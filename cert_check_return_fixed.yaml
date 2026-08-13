@@ -1,0 +1,33 @@
+suite:
+  code: cert_check_return
+  name: 凭证审核签章-退回
+  tenant: 财政一体化
+  default_org: '101001'
+  fiscal_year: '2026'
+  on_case_failure: continue
+  requires_runtime_serial: false
+cases:
+- code: cert_check_return_case_1
+  name: 凭证审核签章-退回 - 用例1
+  user: 默认用户
+  default_org: '101001'
+  steps:
+  - action: open_menu
+    menu_path: 集中支付>>资金支付>>集中支付凭证审核签章
+  - component: table_row_selection
+    operation: select
+    target:
+      row_number: 1
+  - component: toolbar
+    operation: click
+    target:
+      label: 退回
+  - component: form
+    operation: fill
+    target:
+      fields:
+        上一岗: '1'
+  - component: dialog
+    operation: click
+    target:
+      label: 确定

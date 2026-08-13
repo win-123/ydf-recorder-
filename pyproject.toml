@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ydf-recorder"
+dynamic = ["version"]
+description = "YonDiF 浏览器操作录制器 — 录制用户操作并生成 ydf-browser DSL YAML"
+requires-python = ">=3.11"
+dependencies = [
+    "playwright>=1.52.0",
+    "PyYAML>=6.0.1",
+    "requests>=2.32.0",
+]
+
+[project.scripts]
+ydf-recorder = "ydf_recorder.cli:console_main"
+
+# 版本号统一从 _version.py 读取，避免两处维护不同步
+[tool.setuptools.dynamic]
+version = {attr = "ydf_recorder._version.__version__"}
+
+# 目录名带连字符（ydf-recorder），无法直接作为 Python 包名导入。
+# 通过 package-dir 将当前目录映射为 ydf_recorder 包。
+[tool.setuptools]
+packages = ["ydf_recorder"]
+
+[tool.setuptools.package-dir]
+ydf_recorder = "."
