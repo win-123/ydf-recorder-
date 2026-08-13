@@ -121,6 +121,11 @@ def _add_record_args(parser: argparse.ArgumentParser) -> None:
         help="跳过自动登录，手动在浏览器中登录",
     )
     parser.add_argument(
+        "--auto-capture", dest="auto_capture", action="store_true", default=False,
+        help="自动注入 capture 步骤：form.fill 后添加 form.capture_values，"
+             "table_row_selection.select 后添加 table.capture_row_values",
+    )
+    parser.add_argument(
         "--headed", action="store_true", default=True,
         help="显示浏览器窗口（录制时默认开启）",
     )
@@ -434,7 +439,7 @@ def _convert_from_events(args: argparse.Namespace, output_path: str) -> int:
         user=user,
         events=events,
     )
-    document = build_dsl_document(session, abstract=args.abstract_values)
+    document = build_dsl_document(session, abstract=args.abstract_values, auto_capture=args.auto_capture)
     yaml_content = dsl_to_yaml(document)
 
     Path(output_path).write_text(yaml_content, encoding="utf-8")
@@ -517,7 +522,7 @@ def _record_from_browser(args: argparse.Namespace, output_path: str) -> int:
         page_title=page_title,
     )
 
-    document = build_dsl_document(session, abstract=args.abstract_values)
+    document = build_dsl_document(session, abstract=args.abstract_values, auto_capture=args.auto_capture)
     yaml_content = dsl_to_yaml(document)
 
     Path(output_path).write_text(yaml_content, encoding="utf-8")

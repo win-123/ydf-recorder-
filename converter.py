@@ -35,6 +35,7 @@ __all__ = [
     "convert_events_to_steps",
     "dsl_to_yaml",
     "extract_menu_path",
+    "inject_captures",
     "load_events_from_json",
     "load_events_from_jsonl",
 ]
@@ -189,12 +190,14 @@ def _make_popup_synthetic(
 def convert_events_to_steps(
     events: list[RecordedEvent],
     abstract: bool = False,
+    auto_capture: bool = False,
 ) -> list[dict[str, Any]]:
     """将录制事件列表转换为 DSL 步骤 dict 列表。
 
     Args:
         events: 录制事件列表。
         abstract: 是否自动将硬编码值抽象为 ``{{random.*}}`` 变量。
+        auto_capture: 是否自动注入 capture 步骤（form.capture_values / table.capture_row_values）。
 
     Returns:
         DSL 步骤 dict 列表（可直接序列化为 YAML）。
@@ -235,6 +238,8 @@ def convert_events_to_steps(
     steps = _dedup_editable_table_fills(steps)
     steps = _merge_toolbar_sub_labels(steps)
     steps = _deduplicate_steps(steps)
+    if auto_capture:
+        steps = _inject_captures(steps)
     return steps
 
 
@@ -1347,9 +1352,10 @@ def extract_menu_path(events: list[RecordedEvent]) -> str | None:
 def build_dsl_document(
     session: RecordingSession,
     abstract: bool = False,
+    auto_capture: bool = False,
 ) -> DslDocument:
     """从录制会话构建完整的 DSL 文档（suite + cases）。"""
-    steps = convert_events_to_steps(session.events, abstract=abstract)
+    steps = convert_events_to_steps(session.events, abstract=abstract, auto_capture=auto_capture)
 
     menu_path = session.menu_path or extract_menu_path(session.events)
 
@@ -1439,6 +1445,94 @@ def _deduplicate_steps(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
         if step != result[-1]:
             result.append(step)
     return result
+
+
+# ── capture 自动注入 ────────────────────────────────────────
+
+def _sanitize_variable_name(label: str) -> str:
+    """将字段标签转为合法的 capture 变量名。
+
+    保留中文字符/字母/数字，清理多余空白，限制长度 30。
+    """
+    name = re.sub(r'\s+', '', label)
+    if len(name) > 30:
+        name = name[:30]
+    return name if name else "field"
+
+
+def _inject_form_captures(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """在 ``form.fill`` 步骤后自动注入 ``form.capture_values``。
+
+    捕获刚刚填写的字段值，供后续 case 引用。
+    """
+    result: list[dict[str, Any]] = []
+    for step in steps:
+        result.append(step)
+        if step.get("component") == "form" and step.get("operation") == "fill":
+            target = step.get("target") or {}
+            fields = target.get("fields") or target.get("values") or {}
+            if not fields:
+                field_label = target.get("field")
+                if field_label:
+                    fields = {field_label: target.get("equals", "")}
+            if fields:
+                capture: dict[str, str] = {}
+                for field_label in fields:
+                    var_name = _sanitize_variable_name(str(field_label))
+                    capture[var_name] = str(field_label)
+                if capture:
+                    result.append({
+                        "component": "form",
+                        "operation": "capture_values",
+                        "target": {"capture": capture},
+                    })
+    return result
+
+
+def _inject_table_captures(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """在 ``table_row_selection.select`` 步骤后自动注入 ``table.capture_row_values``。
+
+    捕获选中行的关键列值，供后续 case 引用。
+    """
+    result: list[dict[str, Any]] = []
+    for step in steps:
+        result.append(step)
+        if step.get("component") == "table_row_selection" and step.get("operation") == "select":
+            target = step.get("target") or {}
+            match = target.get("match")
+            if match and isinstance(match, dict):
+                column = match.get("column")
+                equals = match.get("equals")
+                if column and equals:
+                    var_name = _sanitize_variable_name(str(column))
+                    result.append({
+                        "component": "table",
+                        "operation": "capture_row_values",
+                        "target": {
+                            "table": target.get("table", ""),
+                            "table_name": target.get("table_name", ""),
+                            "match": {"column": str(column), "equals": str(equals)},
+                            "capture": {var_name: str(column)},
+                        },
+                    })
+    return result
+
+
+def _inject_captures(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """对生成的步骤列表注入 capture 步骤。
+
+    目前支持：
+    - ``form.fill`` → ``form.capture_values``（捕获填写的字段值）
+    - ``table_row_selection.select`` → ``table.capture_row_values``（捕获选中行的列值）
+    """
+    steps = _inject_form_captures(steps)
+    steps = _inject_table_captures(steps)
+    return steps
+
+
+def inject_captures(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """公开 API：对生成的步骤列表注入 capture 步骤。见 _inject_captures。"""
+    return _inject_captures(steps)
 
 
 class _RoundTripDumper(yaml.Dumper):
