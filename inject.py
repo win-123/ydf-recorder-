@@ -36,6 +36,22 @@ RECORDER_JS = r"""
   var inputTimers = {};
   var INPUT_DEBOUNCE_MS = 500;
 
+  // 无显式下拉指示器的常见下拉触发按钮文案（hover 合成用）。
+  // '审核'/'弃审' 特意不在内 —— 它们通常是独立按钮（见 hover 处理处注释）。
+  var RECORDER_DROPDOWN_ACTIONS = ['新增', '删除', '导入', '导出', '打印', '更多', '操作', '批量', '批量操作'];
+
+  // 运行时追加下拉触发词（由 Python 侧注入单据元数据时调用）
+  window.__ydf_recorder_set_dropdown_actions = function (words) {
+    try {
+      if (!Array.isArray(words)) return;
+      for (var i = 0; i < words.length; i++) {
+        if (typeof words[i] === 'string' && RECORDER_DROPDOWN_ACTIONS.indexOf(words[i]) === -1) {
+          RECORDER_DROPDOWN_ACTIONS.push(words[i]);
+        }
+      }
+    } catch (e) {}
+  };
+
   // ── helpers ──────────────────────────────────────────────
 
   function nowMs() {
@@ -125,9 +141,13 @@ RECORDER_JS = r"""
   }
 
   function guessRegionType(el) {
-    if (isInDialog(el)) return 'dialog_page';
-    if (el.closest('[class*="tree"], [class*="Tree"], .ant-tree, .wui-tree')) return 'tree';
+    // ★ 问题4修复：tree/tab 检测必须先于弹窗判定 —— 否则弹窗内的参照树、
+    //   页签全被标成 dialog_page，Python 端 _recognize_tree（要求 region=tree）
+    //   和参照合成 Pattern 1（要求 region=tree）永远不命中，
+    //   表现为「弹窗里通过树选择数据的步骤没有录制上」
+    if (el.closest('[class*="tree"], [class*="Tree"], .ant-tree, .wui-tree, .lcd-tree, [role="tree"]')) return 'tree';
     if (el.closest('.ant-tabs, .wui-tabs, [role="tablist"], [class*="YDFStepsNext"]')) return 'tab_bar';
+    if (isInDialog(el)) return 'dialog_page';
     if (el.closest('.lcd-query-string, [class*="query"], [class*="Query"], [class*="searchBox"], [class*="search"]')) return 'query_box';
     // ★ 表头区域（含列头筛选输入框）优先于 main_table
     if (isInTable(el) && isInTableHeader(el)) return 'table_header';
@@ -360,6 +380,19 @@ RECORDER_JS = r"""
       var rows = table.querySelectorAll('tbody tr, .wui-table-row, .ant-table-row, .u-table-row, [role="grid"] [role="row"], [class*="table-body"] [class*="table-row"], [class*="TableBody"] [class*="TableRow"]');
       var idx = Array.prototype.indexOf.call(rows, row);
       if (idx >= 0) rowNumber = idx + 1;
+    }
+    // ★ 兜底（问题5）：分离表头/表体的 YonDiF 网格可能匹配不到 table 容器，
+    //   此时用 row 在其父容器（表体行容器）内的序号作为行号 —— 与回放端
+    //   _click_row_checkbox_by_index 的“第 N 个可见可选数据行”语义一致；
+    //   tr 元素优先用 sectionRowIndex（同一表体内的序号，不含表头）。
+    if (rowNumber === null) {
+      if (row.tagName === 'TR' && typeof row.sectionRowIndex === 'number' && row.sectionRowIndex >= 0) {
+        rowNumber = row.sectionRowIndex + 1;
+      } else if (row.parentElement) {
+        var siblings = row.parentElement.children;
+        var idx2 = Array.prototype.indexOf.call(siblings, row);
+        if (idx2 >= 0) rowNumber = idx2 + 1;
+      }
     }
     var columnHeader = null;
     var cell = el.closest('td, [role="gridcell"], [role="cell"], [class*="table-cell"], [class*="TableCell"]');
@@ -594,8 +627,43 @@ RECORDER_JS = r"""
     return !!(el.closest('[class*="transfer"], [class*="Transfer"], [class*="shuttle"], [class*="Shuttle"], [class*="doubleList"], [class*="double-list"]'));
   }
 
-  // ★ 检测元素是否是通知提示的关闭按钮
-  function isNotificationClose(el) {
+// ★ 检测元素是否是 YDFSwitch / WUI Switch 开关组件
+// YonDiF YDFSwitch 渲染为 <button class="wui-switch is-checked" fieldid="fkrxx_form_xxx">
+// 也兼容 Ant Design 的 <div role="switch"> 和原生 <input type="checkbox" role="switch">
+function isSwitchControl(el) {
+  // Ant Design 风格：role="switch"
+  if (el.getAttribute && el.getAttribute('role') === 'switch') return true;
+  // ★ 问题4：YonDiF 自定义开关常是无特征的普通 button/span，
+  //   放宽为：向上找最近的 switch 类容器（含 role/大小写变体）
+  try {
+    if (el.closest && el.closest('[role="switch"], [class*="switch" i], [class*="Switch"]')) return true;
+  } catch (ex) {}
+  // 向上查找 1 层（可能点击到 span 子元素）
+  var parent = el.parentElement;
+  if (parent) {
+    var pcls = typeof parent.className === 'string' ? parent.className : '';
+    if (/wui-switch|ant-switch/i.test(pcls)) return true;
+  }
+  return false;
+}
+
+// ★ 问题4：读取开关当前状态（点击后派发的 change 不存在时，
+//   Python 端 _build_form 可用该值替代默认 'true'）
+function readSwitchState(el) {
+  var scope = el;
+  try {
+    scope = el.closest('[role="switch"], [class*="switch" i], [class*="Switch"]') || el;
+  } catch (ex) {}
+  var aria = scope.getAttribute ? scope.getAttribute('aria-checked') : null;
+  if (aria === 'true') return 'true';
+  if (aria === 'false') return 'false';
+  var cls = typeof scope.className === 'string' ? scope.className : '';
+  if (/\b(is-checked|ant-switch-checked|checked)\b/.test(cls)) return 'true';
+  return 'false';
+}
+
+// ★ 检测元素是否是通知提示的关闭按钮
+function isNotificationClose(el) {
     var container = el.closest('[class*="notification"], [class*="Notification"], [class*="notice"], [class*="message-"], [class*="Message"], [class*="alert"], [class*="toast"], [class*="Toast"], [class*="snackbar"]');
     if (!container) return false;
     var cls = typeof el.className === 'string' ? el.className : '';
@@ -630,6 +698,66 @@ RECORDER_JS = r"""
     return val || null;
   }
 
+  // ── 组件类型结构化检测（P0-2 元数据驱动识别） ─────────────
+  // 依据 YDF/wui/antd 组件库的稳定 class 约定判定 widget 类型，
+  // 让 converter 用 widget_type 取代分散的正则/class 前缀猜测。
+
+  function detectWidgetType(el) {
+    try {
+      if (!el || !el.closest) return null;
+      var tag = (el.tagName || '').toUpperCase();
+      if (el.isContentEditable || el.closest('[contenteditable="true"]')) return 'richtext';
+      if (tag === 'INPUT' && el.type === 'file') return 'upload';
+      if (isSwitchControl(el)) return 'switch';
+      if (isAmountUnitControl(el)) return 'amount_unit';
+      var cls = typeof el.className === 'string' ? el.className : '';
+      // 日期输入框（picker/calendar 系组件）
+      if (/picker|calendar|datepicker|timepicker/i.test(cls) ||
+          el.closest('.ant-picker, .ant-calendar, [class*="datepicker"], [class*="date-picker"], [class*="calendar"]')) {
+        return 'date';
+      }
+      if (tag === 'SELECT') return 'select';
+      if (/combobox|select-item|dropdown-item|cascader/i.test(cls) ||
+          el.closest('.ant-select, .wui-select, [class*="combobox"], [class*="cascader"]')) {
+        return 'select';
+      }
+      if (isReferenceTrigger(el)) return 'refer';
+      if (tag === 'TEXTAREA') return 'textarea';
+      if (tag === 'INPUT') return 'input';
+      return null;
+    } catch (e) { return null; }
+  }
+
+  // 是否位于日期选择弹层内（结构化识别日历单元格，兼容设计器任意 formatType）
+  function isInDatePickerDropdown(el) {
+    try {
+      if (!el || !el.closest) return false;
+      return !!el.closest(
+        '.ant-picker-dropdown, .ant-calendar-picker-container, [class*="picker-dropdown"], ' +
+        '[class*="calendar"], .wui-calendar, .lcd-calendar'
+      );
+    } catch (e) { return false; }
+  }
+
+  // ★ P1-7：工作流批量结果层检测（与回放端 _WORKFLOW_RESULT_SCAN_SCRIPT 语义对齐）
+  var WORKFLOW_RESULT_PATTERN = /提交请求已执行完毕|部分失败|([^\n]{0,30}批量[^\n]{0,30}(?:完成|失败))|((?:成功|失败)\s*\d+\s*条)/;
+
+  function findWorkflowResultLayer(el) {
+    var node = el;
+    var depth = 0;
+    while (node && node !== document.body && depth < 30) {
+      if (node.nodeType === 1) {
+        var text = ((node.innerText || node.textContent) || '').trim();
+        if (text && text.length <= 1600 && WORKFLOW_RESULT_PATTERN.test(text)) {
+          return node;
+        }
+      }
+      node = node.parentElement;
+      depth++;
+    }
+    return null;
+  }
+
   function extractTarget(el) {
     var popup = findPopupReferenceDialog(el);
     var cellInfo = popup ? extractClickedCellInfo(el, popup) : null;
@@ -645,6 +773,11 @@ RECORDER_JS = r"""
     if (!inHeader && !editableCell && isInTable(el) && isReferenceTrigger(el)) {
       editableCell = extractEditableTableCellInfo(el);
     }
+    // ★ 问题5：表体内任意点击（含 checkbox/radio 单元格 td）都提取行号 ——
+    //   行号定位比内容 match 更稳定（单据号动态生成），不应只限于 input/触发器
+    if (!inHeader && !editableCell && isInTable(el)) {
+      editableCell = extractEditableTableCellInfo(el);
+    }
     // Also extract cell info for ALL table clicks (checkbox, row action, cell link, editable cell)
     // so that table_row_selection / table_row_action can build match:{column, equals}
     // ★ 即使 editableCell 已设置也要提取 cellInfo —— checkbox 等非编辑元素需要 cellText/columnHeader
@@ -657,6 +790,18 @@ RECORDER_JS = r"""
     if (isInTable(el) && !inHeader) {
       rowData = extractRowData(el);
     }
+
+    // ★ 文件输入：浏览器安全限制下 el.value 只有 fakepath，改捕真实文件名
+    var fileNames = null;
+    if (upperTag === 'INPUT' && el.type === 'file' && el.files && el.files.length) {
+      var fnames = [];
+      for (var fi = 0; fi < el.files.length; fi++) fnames.push(el.files[fi].name);
+      fileNames = fnames.join(', ');
+    }
+
+    // ★ P1-7：工作流批量结果层信号（confirm/details 点击与 Alt+检查点断言用）
+    var wfLayer = findWorkflowResultLayer(el);
+
     return {
       fieldid: getFieldId(el) || null,
       label_text: getLabelText(el) || null,
@@ -667,7 +812,14 @@ RECORDER_JS = r"""
       in_dialog: isInDialog(el),
       in_table: isInTable(el),
       region_type: guessRegionType(el),
-      value: (el.value !== undefined ? String(el.value) : null),
+      value: fileNames
+        || (isSwitchControl(el)
+              ? readSwitchState(el)
+              : (el.value !== undefined && el.value !== null && el.value !== ''
+                    ? String(el.value)
+                    : (el.isContentEditable
+                         ? ((el.textContent || '').trim().substring(0, 500) || null)
+                         : null))),
       display_text: getDisplayText(el),
       id: el.id || null,
       name: el.getAttribute('name') || null,
@@ -697,7 +849,19 @@ RECORDER_JS = r"""
       is_upload_trigger: isUploadTrigger(el),
       is_amount_unit: isAmountUnitControl(el),
       is_transfer_item: isTransferDialogItem(el),
-      is_notification_close: isNotificationClose(el)
+      is_notification_close: isNotificationClose(el),
+      is_switch: isSwitchControl(el),
+      is_workflow_result: !!wfLayer,
+      workflow_result_text: wfLayer ? ((wfLayer.innerText || '').trim().substring(0, 600) || null) : null,
+      // ★ 通知正文文本（is_notification_close 时提取，用于 notification.assert）
+      notification_text: isNotificationClose(el) ? extractNotificationText(el) : null,
+      // ★ 组件类型（结构化检测；日期弹层内的单元格点击统一标记为 date_cell）
+      widget_type: (function () {
+        var inDateDd = isInDatePickerDropdown(el);
+        var wt = detectWidgetType(el);
+        if (inDateDd) return 'date_cell';
+        return wt;
+      })()
     };
   }
 
@@ -723,6 +887,23 @@ RECORDER_JS = r"""
       frame_url: location.href,
       is_trusted: true
     };
+  }
+
+  // 提取通知组件的正文文本（用于自动生成 notification.assert）
+  function extractNotificationText(el) {
+    try {
+      var container = el.closest && el.closest(
+        '[class*="notification-notice"], [class*="message-notice"], [class*="notification-item"], [class*="message-item"]'
+      );
+      if (!container) return null;
+      var msgEl = container.querySelector(
+        '[class*="notice-content"], [class*="notice-description"], [class*="notice-message"], [class*="message-content"], [class*="description"]'
+      );
+      var text = ((msgEl ? msgEl.textContent : container.textContent) || '').replace(/\s+/g, ' ').trim();
+      // 去掉关闭按钮的 × 字符残留
+      text = text.replace(/[×✕✖xX]\s*$/, '').trim();
+      return text || null;
+    } catch (e) { return null; }
   }
 
   function pushEvent(type, el) {
@@ -1032,13 +1213,14 @@ RECORDER_JS = r"""
     // Text too long → container/panel click, not a specific button
     if (text.length > 30) return { ok: false, reason: 'long_text:' + text.length + 'chars' };
     // Check class hints — might be a button-like container or dropdown/menu item
+    // ★ navbar 区域（lebra-navbar-right）是 YonDiF 导航栏可点击区域，不应过滤
     var cls = typeof el.className === 'string' ? el.className : '';
-    if (/btn|button|toolbar|action|tab|dropdown|menu|item|option|popup|select/i.test(cls)) return { ok: true };
-    // Check ancestor (up to 3 levels) for button/menu context
+    if (/btn|button|toolbar|action|tab|dropdown|menu|item|option|popup|select|navbar|clickable/i.test(cls)) return { ok: true };
+    // Check ancestor (up to 3 levels) for button/menu/navbar context
     var parent = el.parentElement;
     for (var k = 0; k < 3 && parent; k++) {
       var pcls = typeof parent.className === 'string' ? parent.className : '';
-      if (/btn|button|toolbar|action|dropdown|menu|popup/i.test(pcls)) return { ok: true };
+      if (/btn|button|toolbar|action|dropdown|menu|popup|navbar|clickable/i.test(pcls)) return { ok: true };
       parent = parent.parentElement;
     }
     // Container with short text but no button hints → reject
@@ -1080,6 +1262,14 @@ RECORDER_JS = r"""
       if (filteredClicks.length > 50) filteredClicks.shift();
       try { console.warn('[ydf-recorder] 点击被过滤:', filteredInfo); } catch (ex) {}
       persist();
+      return;
+    }
+
+    // ★ 断言检查点：Alt+点击 → 记录 checkpoint 事件（converter 生成 assert 步骤）。
+    //   表单字段 → form.assert_values；表格行内 → table.assert_row_values；
+    //   通知关闭按钮 → notification.assert。不影响页面正常行为。
+    if (e.altKey) {
+      pushEvent('checkpoint', el);
       return;
     }
 
@@ -1271,7 +1461,8 @@ RECORDER_JS = r"""
     // ★ 注意：'审核' 和 '弃审' 已从此列表中移除 — 它们通常是独立操作按钮，
     //   不是下拉触发器。如果某页面确实有审核下拉，aria-haspopup 或 class 检查会捕获。
     //   详见 CDP 抓取结果：审核按钮 class=wui-button-primary，无下拉指示器。
-    var knownActions = ['新增', '删除', '导入', '导出', '打印', '更多'];
+    //   可通过 __ydf_recorder_set_dropdown_actions() 运行时追加（元数据驱动，见 cdp.py）。
+    var knownActions = RECORDER_DROPDOWN_ACTIONS;
     if (!hasDropdown && knownActions.indexOf(text) !== -1) {
       hasDropdown = true;
     }
@@ -1296,6 +1487,7 @@ RECORDER_JS = r"""
     var el = e.target;
     if (!el) return;
     if (el.closest('#__ydf_recorder_ui')) return;
+    // ★ 富文本（contenteditable）的输入也走 input 事件，保留（P1-6）
 
     var key = el.getAttribute('fieldid') || el.getAttribute('data-fieldid') || el.id || el.name || buildSelector(el);
 
@@ -1388,6 +1580,15 @@ RECORDER_JS = r"""
 
   window.__ydf_recorder_dump = function () {
     return JSON.parse(JSON.stringify(events));
+  };
+
+  // 增量导出：只返回 seq 大于 sinceSeq 的事件（跨 frame 采集时避免全量重复序列化）
+  window.__ydf_recorder_dump_since = function (sinceSeq) {
+    var out = [];
+    for (var i = 0; i < events.length; i++) {
+      if (events[i].seq > sinceSeq) out.push(events[i]);
+    }
+    return JSON.parse(JSON.stringify(out));
   };
 
   // 导出被过滤的点击（用于诊断"录制不到"的问题）

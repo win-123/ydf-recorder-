@@ -239,6 +239,9 @@ class RecorderRuntime:
         self._paused = False
         self._events: list[dict[str, Any]] = []
         self._poll_interval_ms = 500
+        # 跨 frame 事件采集状态
+        self._event_store: dict[tuple, dict[str, Any]] = {}   # 事件去重存储，key 见 _event_key
+        self._frame_watermarks: dict[int, int] = {}           # 每个 frame 已采集到的最大 seq
         self._service_code: str = ""  # 菜单解析得到的 serviceCode
         self._api_session = None  # requests.Session for API calls (aligned with ydf-browser)
 
@@ -726,16 +729,60 @@ class RecorderRuntime:
     # ── 事件采集与实时 YAML ───────────────────────────────────
 
     def _capture_events(self) -> list[dict[str, Any]]:
-        """从目标页拉取当前已捕获的全部事件。"""
+        """从目标页的**所有 frame**拉取已捕获事件并合并。
+
+        事件存储在各 frame 自己的 sessionStorage 中，只 dump 主 frame 会
+        丢失 iframe 内的操作（YonDiF 弹窗/卡片页大量使用 iframe）。
+        使用 __ydf_recorder_dump_since 做 per-frame 增量拉取，减少序列化开销；
+        旧版本注入脚本（无 dump_since）自动回退到全量 dump + 事件级去重。
+        """
         try:
-            result = self._page.evaluate(
-                "JSON.stringify(window.__ydf_recorder_dump ? window.__ydf_recorder_dump() : [])"
-            )
-            data = json.loads(result) if isinstance(result, str) else result
-            return data or []
-        except Exception as ex:
-            print(f"[ydf-recorder] ⚠️ _capture_events error: {ex}", flush=True)
-            return []
+            frames = list(self._page.frames)
+        except Exception:
+            frames = [self._page.main_frame]
+        for frame in frames:
+            since = self._frame_watermarks.get(id(frame), 0)
+            try:
+                result = frame.evaluate(
+                    "(s) => JSON.stringify("
+                    "  window.__ydf_recorder_dump_since ? window.__ydf_recorder_dump_since(s)"
+                    "  : (window.__ydf_recorder_dump ? window.__ydf_recorder_dump() : []))",
+                    since,
+                )
+                data = json.loads(result) if isinstance(result, str) else result
+            except Exception:
+                # frame 已 detach / 导航中 / 不可执行 —— 跳过，下轮重试
+                continue
+            max_seq = self._frame_watermarks.get(id(frame), 0)
+            fallback_full_dump = max_seq > 0  # 回退全量 dump 时避免推进水位
+            for e in data or []:
+                if not isinstance(e, dict):
+                    continue
+                key = self._event_key(e)
+                if key not in self._event_store:
+                    self._event_store[key] = e
+                seq = e.get("seq")
+                if isinstance(seq, int) and seq > max_seq and not fallback_full_dump:
+                    max_seq = seq
+            if not fallback_full_dump:
+                self._frame_watermarks[id(frame)] = max_seq
+        return sorted(
+            self._event_store.values(),
+            key=lambda e: ((e.get("timestamp") or 0), (e.get("seq") or 0)),
+        )
+
+    @staticmethod
+    def _event_key(e: dict[str, Any]) -> tuple:
+        """事件去重键：同 type+时间戳+目标特征视为同一事件。"""
+        t = e.get("target") or {}
+        return (
+            e.get("type"),
+            e.get("timestamp"),
+            t.get("fieldid"),
+            t.get("label_text"),
+            t.get("text"),
+            t.get("value"),
+        )
 
     def _live_yaml(self, raw_events: list[dict[str, Any]]) -> str:
         """用 converter 把当前事件列表转成 YAML，供检查器实时预览。"""
@@ -826,14 +873,7 @@ class RecorderRuntime:
 
     def collect_events(self) -> list[dict[str, Any]]:
         """直接获取当前已捕获的事件（不等待停止）。"""
-        try:
-            result = self._page.evaluate(
-                "JSON.stringify(window.__ydf_recorder_dump ? window.__ydf_recorder_dump() : [])"
-            )
-            events = json.loads(result) if isinstance(result, str) else []
-            return events
-        except Exception:
-            return []
+        return self._capture_events()
 
     def resolve_menu_path(self, service_code: str) -> str | None:
         """录制停止后反查 serviceCode → 中文菜单路径。

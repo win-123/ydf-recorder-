@@ -49,17 +49,31 @@ def coalesce_events(
 ) -> list[tuple[tuple[str, str], list[RecordedEvent]]]:
     """将连续可合并的事件分组。
 
+    ★ 弹窗边界（dialog_open/dialog_close/navigation）会**断开**当前合并组，
+    即使这些事件本身不产生步骤（cls=None）。这样可以避免弹窗前后的
+    form.fill 事件被合并为一组（导致后面的字段覆盖前面的）。
+
     Returns:
         ``[((component, operation), [events]), ...]``
     """
+    # 这些事件类型作为分隔符，断开当前合并组
+    SEPARATOR_TYPES = frozenset({"dialog_open", "dialog_close", "navigation"})
+
     groups: list[tuple[tuple[str, str], list[RecordedEvent]]] = []
+    # ★ 追踪是否遇到分隔符；遇到后强制开启新组（不复用当前组）
+    force_new_group = False
     for event, cls in zip(events, classifications):
+        # ★ 分隔事件断开当前组：设置标志，后续事件不能合并到前面的组
+        if event.type in SEPARATOR_TYPES:
+            force_new_group = True
+            continue
         if cls is None:
             continue
-        if groups and can_coalesce(groups[-1][0], cls, groups[-1][1][-1], event):
+        if not force_new_group and groups and can_coalesce(groups[-1][0], cls, groups[-1][1][-1], event):
             groups[-1][1].append(event)
         else:
             groups.append((cls, [event]))
+            force_new_group = False
     return groups
 
 
@@ -105,6 +119,19 @@ def abstract_values(target: dict[str, Any]) -> dict[str, Any]:
 
 
 # ── 主转换 ─────────────────────────────────────────────────
+
+# 日期单元格文本的兜底正则（yyyy-MM-dd 开头）；首选 inject.js 的结构化
+# widget_type='date_cell' 标记（兼容设计器任意 formatType，如 yyyy/MM/dd、yyyyMM）。
+_DATE_CELL_RE = re.compile(r"^\d{4}-\d{2}-\d{2}")
+
+
+def _is_date_cell(event) -> bool:
+    """事件是否是日历单元格点击（结构化标记优先，正则兼容旧事件流）。"""
+    text = event.target.cell_text
+    if not text:
+        return False
+    return event.target.widget_type == "date_cell" or bool(_DATE_CELL_RE.match(text))
+
 
 # 已知工具栏动作集合 — 用于 extract_popup_reference 中阻止误消费
 _TOOLBAR_ACTION_SET = frozenset(
@@ -201,7 +228,17 @@ def convert_events_to_steps(
 
     Returns:
         DSL 步骤 dict 列表（可直接序列化为 YAML）。
+
+    Note:
+        ★ P1-6 设计决策：回放 DSL 无 dblclick / scroll 操作对 —
+        双击在回放端是 editable_table 单元格激活的内部行为（runtime 自带
+        dblclick 重试链），滚动是无语义的伴随动作。因此录制器不监听这两类
+        事件：双击产生的两次 click 由去重/合并管线吸收，滚动事件直接忽略。
     """
+    # 预处理（P1-5）：将文件选择 change 事件的文件名回填到前序上传按钮点击，
+    # 供 upload 构建器生成带文件名的占位符（必须在任何事件过滤前执行）
+    events = _backfill_upload_filenames(events)
+
     # 预处理：将「点击表单参照字段 → 选择树节点」转为合成的 form change 事件，
     # 并过滤表单输入框的聚焦点击
     events = _preprocess_form_interactions(events)
@@ -231,6 +268,10 @@ def convert_events_to_steps(
         step: dict[str, Any] = {"component": component, "operation": operation}
         if target:
             step["target"] = target
+        # ★ 问题1修复：form.fill 步骤携带表单上下文，
+        #   供 _merge_form_fills 做跨间隔的上下文感知合并（键会在合并后剥离）
+        if component == "form" and operation == "fill":
+            step["_form_ctx"] = _form_ctx_of(group_events[0])
         steps.append(step)
     steps = [s for s in steps if not _is_noise_step(s)]
     steps = _merge_form_fills(steps)
@@ -238,9 +279,55 @@ def convert_events_to_steps(
     steps = _dedup_editable_table_fills(steps)
     steps = _merge_toolbar_sub_labels(steps)
     steps = _deduplicate_steps(steps)
+    steps = _inject_notification_asserts(steps)
     if auto_capture:
         steps = _inject_captures(steps)
     return steps
+
+
+def _backfill_upload_filenames(events: list[RecordedEvent]) -> list[RecordedEvent]:
+    """将文件选择 change 事件的真实文件名回填到前序上传按钮点击（P1-5）。
+
+    浏览器安全模型下录制器拿不到完整文件路径，只能拿到 ``el.files`` 里的文件名。
+    这里按时间顺序将文件名关联到最近一次 upload 触发点击（attachment/import），
+    存入 ``target.uploaded_file_name``，供构建器生成 ``<请填写文件路径: xxx.pdf>``。
+    """
+    pending_idx: int | None = None
+    for i, e in enumerate(events):
+        t = e.target
+        if e.type == "click" and t.is_upload_trigger:
+            pending_idx = i
+        elif (
+            e.type == "change"
+            and t.input_type == "file"
+            and t.value
+            and pending_idx is not None
+        ):
+            events[pending_idx].target.uploaded_file_name = t.value
+            pending_idx = None
+    return events
+
+
+def _inject_notification_asserts(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """在每个 notification.close 前自动插入 notification.assert（P1-4）。
+
+    录制到用户关闭通知时，说明通知出现过——前置一条断言验证通知内容，
+    回放时既验证了业务结果又能帮助 close 精准匹配目标通知。
+    """
+    result: list[dict[str, Any]] = []
+    for step in steps:
+        if (
+            step.get("component") == "notification"
+            and step.get("operation") == "close"
+            and (step.get("target") or {}).get("contains")
+        ):
+            result.append({
+                "component": "notification",
+                "operation": "assert",
+                "target": {"contains": step["target"]["contains"]},
+            })
+        result.append(step)
+    return result
 
 
 # 弹窗内不应被识别为"选择项"的按钮标签（工具栏动作 + 弹窗确认/取消）
@@ -254,6 +341,29 @@ _FORM_POPUP_BUTTON_LABELS = frozenset({
 })
 
 
+def _pick_row_display_value(
+    row_data: list[dict[str, str]] | None,
+    display_text: str | None,
+) -> str:
+    """从参照弹窗单选行的 row_data 里挑选最适合回放匹配的显示文本。
+
+    策略：选最长且非纯数字/日期/ID 的列值（标识列通常是描述性文本），
+    兼容 {'column': .., 'value': ..} 结构；找不到则退回 display_text。
+    """
+    best, best_len = "", 0
+    for item in row_data or []:
+        if not isinstance(item, dict):
+            continue
+        v = str(item.get("value") or "").strip()
+        if (
+            len(v) >= 4
+            and len(v) > best_len
+            and not re.fullmatch(r"[\d.:/\-]+", v)
+        ):
+            best, best_len = v, len(v)
+    return best or (display_text or "")
+
+
 def _preprocess_form_interactions(
     events: list[RecordedEvent],
 ) -> list[RecordedEvent]:
@@ -265,8 +375,15 @@ def _preprocess_form_interactions(
     3. **日期选择**：点击 *_suffix span → 点击日历单元格（cell_text 是日期）
     4. **直接输入**：点击 input/textarea → input/change 事件
     5. **弹窗选择器**：点击表单字段 → 弹出选择器 → 点击一个项（非 tree/option/date）→ 可选点「确定」确认
+    6. **弹窗参照表格单选**（问题4 实际形态）：点击参照图标（*_btn_icon）→
+       dialog_open(is_popup_reference) → 点击选择器表格里的单选行（input_type=radio，
+       带 row_data）→ 点选择器自己的「确定」（*_modal_ok）→ 再点外层弹窗确定。
+       合成 change 事件归入 form.fill（回放端 form.fill 对参照字段自动走
+       开弹窗→匹配→确认全流程）。
+    7. **开关兑底**（问题4）：JS 未识别 is_switch 且无 change 事件时，
+       重复点击的「是否*」按钮（tag=button）合成 change 'true'。
 
-    此函数将模式 1-3、5 合成 ``change`` 事件（归入 form.fill），
+    此函数将模式 1-3、5-6 合成 ``change`` 事件（归入 form.fill），
     模式 4 过滤聚焦点击（避免被误分类为 dialog.click）。
     """
     result: list[RecordedEvent] = []
@@ -276,12 +393,50 @@ def _preprocess_form_interactions(
         if i in consumed:
             continue
 
+        # ── 模式 7：开关点击兑底（JS 未标记 is_switch 且无 change 事件）──
+        # YonDiF 自定义开关常是普通 button（无 wui-switch/role=switch 特征），
+        # 点击后也不派发 change → 录制端只能靠「重复点击的『是否*』按钮」推断。
+        if (
+            e.type == "click"
+            and e.target.tag_name == "button"
+            and (e.target.label_text or "").startswith("是否")
+            and e.target.fieldid
+            and not e.target.is_switch  # JS 已识别时交给 registry 的 is_switch 路径
+        ):
+            for j in range(i + 1, min(i + 4, len(events))):
+                ej = events[j]
+                if ej.type == "click" and ej.target.fieldid == e.target.fieldid:
+                    followed_change = any(
+                        events[k].type in ("input", "change")
+                        and (events[k].target.fieldid or "") == e.target.fieldid
+                        for k in range(j + 1, min(j + 5, len(events)))
+                    )
+                    if not followed_change:
+                        # 开关默认否 → 点击后为 true；若需录制「关」用 Alt+点击检查点
+                        result.append(_make_form_change(e, e.target.label_text, "true"))
+                        consumed.update({i, j})
+                    break
+                if ej.type != "click":
+                    break
+
+        if i in consumed:
+            continue
+
         # ── 模式检测：点击表单字段（在弹窗内，非表格，有 label_text）──
+        # ★ 问题4：参照图标（tag=i，fid 以 _btn_icon/_btn_i 结尾）常落在表格
+        #   样式的选择器里，需放宽 in_table 限制
+        _fid_str = e.target.fieldid or ""
+        _is_ref_icon = e.target.is_reference_trigger or _fid_str.endswith(
+            ("_btn_icon", "_btn_i")
+        )
+        _tag_ok = e.target.tag_name in ("input", "div", "span") or (
+            e.target.tag_name == "i" and _is_ref_icon
+        )
         if (
             e.type == "click"
             and e.target.in_dialog
-            and not e.target.in_table
-            and e.target.tag_name in ("input", "div", "span")
+            and (not e.target.in_table or _is_ref_icon)
+            and _tag_ok
             and e.target.label_text
         ):
             label = e.target.label_text
@@ -341,11 +496,17 @@ def _preprocess_form_interactions(
                     consumed.add(j)
                     consumed.update(between_consumed)
                     # ★ 消费后续重复的 tree click（相同文本）
+                    # ★ 问题4修复：原条件 ek_label == ej_label 在两者都为空时
+                    #   恒为真，会把后续任何无 label_text 的点击（如「确定」按钮）
+                    #   误当重复树点击吞掉 —— 要求参与比较的文本非空
                     for k in range(j + 1, min(j + 4, len(events))):
                         ek = events[k]
                         ek_text = (ek.target.text or "").strip()
                         ek_label = (ek.target.label_text or "").strip()
-                        if ek.type == "click" and (ek_text == ej_text or ek_label == ej_label):
+                        if ek.type == "click" and (
+                            (ek_text and ek_text == ej_text)
+                            or (ek_label and ek_label == ej_label)
+                        ):
                             consumed.add(k)
                         elif ek.type != "click":
                             break
@@ -381,8 +542,7 @@ def _preprocess_form_interactions(
                 # ── 模式 3: 日期选择（点击日历单元格，cell_text 是日期格式）──
                 if (
                     ej.type == "click"
-                    and ej.target.cell_text
-                    and re.match(r"^\d{4}-\d{2}-\d{2}", ej.target.cell_text)
+                    and _is_date_cell(ej)
                 ):
                     result.append(_make_form_change(e, label, ej.target.cell_text))
                     consumed.add(i)
@@ -393,8 +553,7 @@ def _preprocess_form_interactions(
                         ek = events[k]
                         if (
                             ek.type == "click"
-                            and ek.target.cell_text
-                            and re.match(r"^\d{4}-\d{2}-\d{2}", ek.target.cell_text or "")
+                            and _is_date_cell(ek)
                             and ek.target.cell_text == ej.target.cell_text
                         ):
                             consumed.add(k)
@@ -408,12 +567,51 @@ def _preprocess_form_interactions(
                     and ej.target.fieldid == fieldid
                 ):
                     break
+                # ── 模式 6: 弹窗参照选择器内的表格单选行（问题4 实际形态）──
+                if (
+                    ej.type == "click"
+                    and ej.target.input_type in ("radio", "checkbox")
+                    and ej.target.row_data
+                ):
+                    value = _pick_row_display_value(
+                        ej.target.row_data, ej.target.display_text
+                    )
+                    # ★ 问题5：参照选择记录行号而非内容值 —— 单据号/账号等内容
+                    #   每次运行动态生成，内容匹配在全新环境回放必败；行号在
+                    #   同等数据准备下稳定。结构化值 {row_number: N} 由回放端
+                    #   popup_reference 行号点选；无行号时退回显示文本匹配。
+                    structured = (
+                        {"row_number": ej.target.editable_row_number}
+                        if (ej.target.editable_row_number or 0) > 0
+                        else None
+                    )
+                    result.append(
+                        _make_form_change(e, label, value, structured_value=structured)
+                    )
+                    consumed.add(i)
+                    consumed.add(j)
+                    consumed.update(between_consumed)
+                    # 消费后续：同字段重复单选（fid 恰等于参照字段前缀）
+                    # ★ 不消费选择器自身的「确定」(*_modal_ok) —— 保留为
+                    #   dialog.confirm（optional），也不消费外层弹窗的确定
+                    ref_prefix = re.sub(r"_btn_i(?:con)?$", "", fieldid)
+                    for k in range(j + 1, min(j + 7, len(events))):
+                        ek = events[k]
+                        if ek.type != "click":
+                            break
+                        ek_fid = ek.target.fieldid or ""
+                        if ref_prefix and ek_fid == ref_prefix:
+                            consumed.add(k)
+                        else:
+                            break
+                    break
+
                 # ── 模式 5: 弹窗选择器项点击（非 tree/option/date 的弹窗内点击）──
                 # 用户点击表单字段 → 弹出选择器 → 点击一个项 → 可选点「确定」确认
                 # 这种模式在 YonDiF 的组织选择、项目选择等场景中很常见
                 if ej.type == "click" and ej.target.region_type != "tree" and "_option_" not in ej_fid:
                     # 日历单元格可能 tag=div 且 in_table=True，不中止
-                    if not (ej.target.cell_text and re.match(r"^\d{4}-\d{2}-\d{2}", ej.target.cell_text)):
+                    if not _is_date_cell(ej):
                         # ★ 检查是否是弹窗选择器项（非按钮类点击，有文本，不在已知按钮标签集合中）
                         ej_text_clean = (ej.target.text or "").strip()
                         is_popup_item = (
@@ -626,8 +824,14 @@ def _make_form_change(
     anchor_ev: RecordedEvent,
     label: str,
     value: str,
+    structured_value: dict[str, Any] | None = None,
 ) -> RecordedEvent:
-    """合成表单 change 事件。"""
+    """合成表单 change 事件。
+
+    structured_value：可选结构化字段值（如 {"row_number": 2}），
+    由 registry._build_form 输出为 YAML 字段的结构化值，回放端按
+    popup_reference 行号点选（问题5）。
+    """
     return RecordedEvent(
         seq=anchor_ev.seq,
         timestamp=anchor_ev.timestamp,
@@ -640,6 +844,7 @@ def _make_form_change(
             region_type="dialog_page",
             value=value,
             display_text=value,
+            structured_value=structured_value,
         ),
         context=anchor_ev.context,
         meta=anchor_ev.meta,
@@ -862,6 +1067,10 @@ def _preprocess_editable_table_references(
     )
     # 弹窗内确认/取消按钮 — 消费但不终止
     _POPUP_BUTTONS = frozenset({"确定", "确认", "OK", "取消", "关闭", "Cancel", "是", "否"})
+    # ★ 问题3修复：页面级工具栏区域 — 扫描窗口内遇到则立即终止。
+    #   这些区域的点击属于页面级操作（如「补充付款人」「生成凭证」），
+    #   绝不是弹窗交互的一部分，不能被范围消费吞掉。
+    _PAGE_TOOLBAR_REGIONS = frozenset({"top_action_bar", "table_action_bar"})
 
     result: list[RecordedEvent] = []
     consumed: set[int] = set()
@@ -871,10 +1080,25 @@ def _preprocess_editable_table_references(
             continue
 
         # ★ 检测：点击可编辑表格单元格
+        # ★ 问题3修复：收紧锚点判定 —— 旧逻辑只要 in_table 点击带 row 号或
+        #   is_reference_trigger 就作锚点，导致主表复选框点击
+        #   （如 first_table_checkbox）和弹窗内表格点击也被当锚点，
+        #   范围消费吞掉后续 21 个事件（含页面工具栏点击和整个弹窗流程），
+        #   表现为「操作多个 toolbar 后面的没有录制上」。
+        #   现要求 fieldid 可解析为 (table, column, row)，或至少含 _table_
+        #   （真实可编辑表格单元格的 fid 形态），并排除 checkbox/radio。
+        fid_str = e.target.fieldid or ""
+        is_checkbox_like = "checkbox" in fid_str or "radio" in fid_str
+        fid_parsed = _parse_editable_fieldid_safe(fid_str)
+        looks_like_editable_cell = fid_parsed is not None or (
+            "_table_" in fid_str and not is_checkbox_like
+        )
         is_editable_cell_click = (
             e.type == "click"
             and e.target.in_table
             and not e.target.in_table_header
+            and not is_checkbox_like
+            and looks_like_editable_cell
             and (
                 e.target.editable_row_number is not None
                 or e.target.is_reference_trigger
@@ -884,8 +1108,17 @@ def _preprocess_editable_table_references(
         # 兜底：in_table click 后续紧跟 dialog_open（参照弹窗打开）
         # ★ 不使用 is_popup_reference，因为它对弹窗内所有元素都为 True
         # ★ 扩大搜索范围到 8 个事件，因为中间可能有重复 click 和 late change 事件
+        # ★ 问题3修复：兜底路径同样要求 fid 像可编辑表格单元格
+        #   （可解析或含 _table_）—— 否则弹窗内表单参照图标点击
+        #   （如 fkrxx_form_payAcctName_btn_icon）也会成为锚点吞掉整个弹窗流程
         if not is_editable_cell_click:
-            if e.type == "click" and e.target.in_table and not e.target.in_table_header:
+            if (
+                e.type == "click"
+                and e.target.in_table
+                and not e.target.in_table_header
+                and not is_checkbox_like
+                and looks_like_editable_cell
+            ):
                 for j in range(i + 1, min(i + 9, len(events))):
                     ej = events[j]
                     if ej.type == "dialog_open":
@@ -980,6 +1213,10 @@ def _preprocess_editable_table_references(
                     seen_dialog_open = True
                     scan_indices.append(j)
                     continue
+                # ★ 问题3修复：页面级工具栏点击 → 立即终止（不消费）。
+                #   参照弹窗还未打开，页面级工具栏操作不可能属于本次参照交互
+                if ej.target.region_type in _PAGE_TOOLBAR_REGIONS:
+                    break
                 # 同一 cell 的重复 click → 消费
                 if ej.type == "click" and ej.target.fieldid == e.target.fieldid:
                     scan_indices.append(j)
@@ -994,6 +1231,12 @@ def _preprocess_editable_table_references(
                 continue
 
             # ── 以下终止条件仅在 dialog_open 之后生效 ──
+
+            # ── ★ 问题3修复：页面级工具栏区域点击 → 终止（不消费）──
+            # 弹窗关闭后用户点了页面级工具栏（如「生成凭证」），
+            # 说明参照交互已结束，窗口内剩余事件绝不能吞
+            if ej.target.region_type in _PAGE_TOOLBAR_REGIONS:
+                break
 
             # ── 终止条件 1: 工具栏按钮（保存/提交等）──
             if (
@@ -1239,51 +1482,114 @@ def _filter_redundant_tree_popup(
     return result
 
 
+def _form_ctx_of(event: RecordedEvent) -> tuple:
+    """form.fill 步骤的表单上下文键（问题1/2修复）。
+
+    同一上下文 = 同一张表单；任一维度变化（弹窗内外/弹窗标题/页签/URL/页面标题）
+    即视为切换了表单。与 registry.can_coalesce 的 form.fill 护栏维度一致。
+    """
+    t, c = event.target, event.context
+    return (
+        bool(t.in_dialog),
+        c.dialog_title or "",
+        c.active_tab or "",
+        c.url or "",
+        c.title or "",
+    )
+
+
+# ★ 问题1修复：合并 form.fill 片段时的「屏障」步骤 —— 跨越这些操作合并
+#   会导致顺序错乱或字段覆盖，它们结束后开启新的表单会话。
+#   注意：tab.click 在列（问题2：页签切换必须保留且不得跨合并）；
+#   popup_reference/tree/dialog/notification 不在列（它们是同一表单
+#   会话内的穿插操作，正是导致碎片化的元凶）。
+_FORM_MERGE_BARRIER_PAIRS = frozenset({
+    ("tab", "click"),                    # 页签/表单切换
+    ("table_row_selection", "select"),   # 主从结构：切行后填的是另一行的明细
+    ("query", "search"),                 # 查询/重置后通常是新一轮操作
+    ("query", "reset"),
+    ("workflow_result", "confirm"),      # 提交后进入结果层，之前的表单会话结束
+    ("workflow_result", "assert"),
+    ("workflow_result", "details"),
+})
+
+# toolbar/action 点击中标志表单会话终结的 label（保存/提交后表单重置）
+_FORM_SESSION_END_LABELS = ("保存", "提交", "暂存", "返回", "关闭", "作废", "生成", "打印")
+
+
+def _is_form_merge_barrier(step: dict[str, Any]) -> bool:
+    """步骤是否为表单合并屏障。"""
+    if (step.get("component"), step.get("operation")) in _FORM_MERGE_BARRIER_PAIRS:
+        return True
+    if step.get("component") in ("toolbar", "action") and step.get("operation") == "click":
+        label = str((step.get("target") or {}).get("label") or "")
+        if any(word in label for word in _FORM_SESSION_END_LABELS):
+            return True
+    # 断言步骤也是屏障：断言针对的是当时的字段快照，
+    # 后续 fill 不能合并到断言之前
+    if str(step.get("operation") or "").startswith("assert"):
+        return True
+    return False
+
+
 def _merge_form_fills(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """合并同一弹窗上下文中的多个 form.fill 步骤为一个。
+    """将同一表单上下文的 form.fill 片段合并为一个步骤（问题1修复）。
 
-    用户在表单中填写字段时，可能穿插 tree.select（参照选择）、tab.click
-    等操作，导致 form.fill 被拆成多个步骤。此函数将同一弹窗内的所有
-    form.fill 合并为一个，字段取并集（后填的覆盖先填的同名字段）。
+    与旧版「仅相邻合并」不同：用户填表时穿插的参照弹窗（popup_reference）、
+    树选择（tree）、通知（notification）等操作会把 fill 拆成多个片段，
+    这些片段仍属于同一张表单（``_form_ctx`` 一致），合并为一个 form.fill
+    （字段取并集，后填覆盖同名字段——这正是用户的最终填写意图），合并结果
+    放在**首个片段**的位置，中间的非屏障步骤保持原位。
 
-    合并后的步骤放在第一个 form.fill 出现的位置。
+    屏障步骤（页签切换、切行选择、查询、保存/提交类按钮、断言）与上下文
+    变化会结束当前会话：之后的 fill 属于新的表单会话，不与之前合并
+    （问题2：防止表单切换被后填操作覆盖/吞掉）。
     """
     if not steps:
         return steps
 
-    # 收集所有 form.fill 步骤的索引
-    form_indices = [
-        i for i, s in enumerate(steps)
-        if s.get("component") == "form" and s.get("operation") == "fill"
-    ]
-    if len(form_indices) <= 1:
-        return steps
-
-    # 合并所有 form.fill 的 fields
-    merged_fields: dict[str, str] = {}
-    for i in form_indices:
-        fields = (steps[i].get("target") or {}).get("fields") or {}
-        merged_fields.update(fields)
-
-    # 构建合并后的 form.fill 步骤（放在第一个 form.fill 的位置）
-    merged_step: dict[str, Any] = {
-        "component": "form",
-        "operation": "fill",
-        "target": {"fields": merged_fields},
-    }
-
-    # 重建步骤列表：用合并后的步骤替换所有 form.fill，其他步骤保持原序
     result: list[dict[str, Any]] = []
-    first_form = True
-    for i, s in enumerate(steps):
-        if i in form_indices:
-            if first_form:
-                result.append(merged_step)
-                first_form = False
-            # 跳过后续的 form.fill 步骤（已合并）
-        else:
-            result.append(s)
-    return result
+    session_ctx: tuple | None = None
+    session_fields: dict[str, str] = {}
+    session_first_idx: int | None = None  # 首个片段在 result 中的位置
+
+    def flush() -> None:
+        nonlocal session_first_idx
+        if session_first_idx is None:
+            return
+        result[session_first_idx] = {
+            "component": "form",
+            "operation": "fill",
+            "target": {"fields": dict(session_fields)},
+        }
+        session_first_idx = None
+
+    for step in steps:
+        if step.get("component") == "form" and step.get("operation") == "fill":
+            ctx = step.get("_form_ctx")
+            if session_first_idx is not None and ctx == session_ctx:
+                # 同一表单会话 → 片段并入当前会话（字段并集，后填覆盖同名）
+                fields = (step.get("target") or {}).get("fields") or {}
+                session_fields.update(fields)
+                continue
+            # 上下文变化 / 首个片段 → 开启新会话
+            flush()
+            session_ctx = ctx
+            session_fields = dict((step.get("target") or {}).get("fields") or {})
+            result.append(step)  # 占位，flush 时替换为合并结果
+            session_first_idx = len(result) - 1
+            continue
+
+        # 非 form.fill 步骤：屏障结束当前会话，其余保持原位
+        if _is_form_merge_barrier(step):
+            flush()
+            session_ctx = None
+            session_fields = {}
+        result.append(step)
+
+    flush()
+    # 剥离内部键，避免泄漏到 YAML
+    return [{k: v for k, v in s.items() if k != "_form_ctx"} if isinstance(s, dict) else s for s in result]
 
 
 def _dedup_editable_table_fills(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:

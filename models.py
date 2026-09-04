@@ -53,11 +53,26 @@ class RecordedEventTarget:
     row_data: list[dict[str, str]] | None = None
     # 元素是否位于表格表头区域（thead），用于区分列头筛选输入框和可编辑表格单元格
     in_table_header: bool = False
-    # 以下 4 个标志由 inject.py JS 检测，用于识别特殊组件
+    # 以下标志由 inject.py JS 检测，用于识别特殊组件
     is_upload_trigger: bool = False       # 元素触发文件上传（附近有 <input type="file">）
     is_amount_unit: bool = False          # 元素是金额单位选择器
     is_transfer_item: bool = False        # 元素位于穿梭框（transfer dialog）内
     is_notification_close: bool = False   # 元素是通知提示的关闭按钮
+    is_switch: bool = False               # 元素是 Switch 开关组件（YDFSwitch/wui-switch）
+    # ★ P1-7：元素位于工作流批量结果层（提交请求已执行完毕/成功 N 条 等），
+    #   workflow_result_text 为该层文本快照（供断言解析 total/succeeded/failed）
+    is_workflow_result: bool = False
+    workflow_result_text: str | None = None
+    # 由 converter 预处理回填（非 JS 注入）：该上传按钮点击后实际选择的文件名
+    # （来自后续 file input change 事件的 el.files），用于生成带文件名的占位符
+    uploaded_file_name: str | None = None
+    # 组件类型（inject.js 结构化检测：input/select/date/date_cell/refer/switch/
+    # textarea/richtext/upload/amount_unit，见 detectWidgetType）。设计器元数据
+    # （widget/formatType/refer）驱动识别的第一层，取代散落的启发式判断。
+    widget_type: str | None = None
+    # 通知组件正文文本（is_notification_close 时由 inject.js 提取，
+    # 用于自动生成 notification.assert 步骤）
+    notification_text: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

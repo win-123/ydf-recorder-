@@ -32,16 +32,29 @@ HandlerBuildTarget = Callable[[str, list[RecordedEvent]], dict[str, Any]]
 # ── 谓词与常量 ──────────────────────────────────────────────
 
 # 工具栏动作的已知中文标签（label → 规范 label，当前为恒等映射，保留扩展点）。
+# 来源：YonDiF 标准单据动作 YBillActionEnum（YAdd/YSave/YDelete/YStop/YUnStop/YExport/YImport...）
+# 对应的按钮文案 + 常见工具栏文案。新增标签时保持恒等映射。
 _KNOWN_ACTION_LABELS: dict[str, str] = {
     "新增": "新增", "删除": "删除", "保存": "保存", "提交": "提交",
     "编辑": "编辑", "详情": "详情", "导入": "导入", "导出": "导出",
-    "打印": "打印", "审核": "审核", "弃审": "弃审", "取消": "取消",
-    "返回": "返回", "确定": "确定", "确认": "确认", "查询": "查询",
+    "打印": "打印", "审核": "审核", "弃审": "弃审",
+    "返回": "返回", "查询": "查询",
+    # ★ 问题3修复：确定/确认/取消 是弹窗按钮词汇，已从已知动作表移除 ——
+    #   YonDiF 自定义弹窗不设 in_dialog 标志，这三个词会把弹窗确认按钮
+    #   误判为 toolbar.click。页面工具栏真按钮由 region 路径识别。
     "重置": "重置", "增行": "增行", "删行": "删行", "更多": "更多",
+    "暂存": "暂存", "停用": "停用", "启用": "启用", "刷新": "刷新",
+    "批量": "批量", "操作": "操作", "处理": "处理", "流程": "流程",
+    "批量操作": "批量操作", "批量处理": "批量处理",
 }
 
 # 表格行操作按钮的可识别文本。
-_TABLE_ROW_ACTION_TEXTS = ("编辑", "详情", "删除", "查看", "修改")
+# 来源：YonDiF 列表页常见行操作文案（含批量操作菜单项）。
+_TABLE_ROW_ACTION_TEXTS = (
+    "编辑", "详情", "删除", "查看", "修改",
+    "送审", "驳回", "审核", "弃审", "启用", "停用",
+    "终止", "撤回", "复制", "参照", "签章",
+)
 
 # action.click 的已知 fieldid（与 ydf-browser executor._RETURN_ACTION_FIELDIDS 对齐）
 _ACTION_CLICK_FIELDIDS = frozenset({"pageHeader_return", "ymbtl_backup"})
@@ -51,7 +64,8 @@ _ACTION_CLICK_LABELS = frozenset({"返回", "返回列表"})
 # 可合并的 (component, operation) 对：连续同类事件合并为单个 step。
 _COALESCEABLE_PAIRS = frozenset(
     {("form", "fill"), ("query", "search"), ("table_row_selection", "select"),
-     ("editable_table", "fill_row"), ("import", "upload"), ("attachment", "upload")}
+     ("editable_table", "fill_row"), ("import", "upload"), ("attachment", "upload"),
+     ("dialog", "confirm"), ("dialog", "cancel")}
 )
 
 
@@ -65,10 +79,32 @@ def is_button_click(event: RecordedEvent) -> bool:
 
 
 def is_form_input(event: RecordedEvent) -> bool:
-    """事件是否是表单输入（input/textarea/select 的 input/change）。"""
-    return event.type in ("input", "change") and event.target.tag_name in (
-        "input", "textarea", "select",
-    )
+    """事件是否是表单输入（input/textarea/select 的 input/change）。
+
+    ★ P1-6：富文本（contenteditable）的 input 事件也算表单输入 —
+    inject.js 的 detectWidgetType 将其标为 widget_type='richtext'，
+    回放端 form.fill 的填值脚本已支持 [contenteditable="true"]。
+    """
+    if event.type not in ("input", "change"):
+        return False
+    if event.target.tag_name in ("input", "textarea", "select"):
+        return True
+    return event.type == "input" and event.target.widget_type == "richtext"
+
+
+def is_switch_toggle(event: RecordedEvent) -> bool:
+    """事件是否是 Switch 开关组件的切换操作。
+
+    YonDiF YDFSwitch 渲染为 ``<button class="wui-switch is-checked">``，
+    由 inject.js 的 ``isSwitchControl`` 检测并设置 ``is_switch=True``。
+    不在表格内时（弹窗/表单中的开关），归入 form.fill。
+    """
+    if not event.target.is_switch:
+        return False
+    # 表格内的 switch 由 table_row_selection 处理
+    if event.target.in_table:
+        return False
+    return True
 
 
 def normalize_field_label(event: RecordedEvent) -> str:
@@ -92,10 +128,23 @@ def _build_form(operation: str, events: list[RecordedEvent]) -> dict[str, Any]:
 
     对于下拉选择字段，优先使用 display_text（如 '2 阶段性'），
     因为 ydf-browser 的 form.fill 期望用户看到的显示值。
+    对于 Switch 开关组件，值用 true/false 表示开/关状态。
+    对于参照选择字段（问题5），优先使用结构化值（如 {"row_number": 2}），
+    回放端按行号点选，避免动态内容匹配失败。
     """
-    fields: dict[str, str] = {}
+    fields: dict[str, Any] = {}
     for e in events:
         label = normalize_field_label(e)
+        # ★ Switch 开关：优先使用 JS 端捕获的状态值（readSwitchState，
+        #   问题4），无状态值时默认 "true"（用户主动切换通常是为了打开）
+        if is_switch_toggle(e):
+            state = (e.target.value or "").strip().lower()
+            fields[label] = state if state in ("true", "false") else "true"
+            continue
+        # ★ 参照选择（问题5）：结构化行号值优先，回放按行号点选
+        if e.target.structured_value:
+            fields[label] = e.target.structured_value
+            continue
         # 下拉选择：优先 display_text（含值+名称），其次 value
         val = e.target.display_text or e.target.value or ""
         fields[label] = val
@@ -203,33 +252,35 @@ def _pick_best_match_column(row_data: list[dict[str, str]]) -> dict[str, str] | 
 def _build_table_row_selection(operation: str, events: list[RecordedEvent]) -> dict[str, Any]:
     """构建 table_row_selection target。
 
-    优先用 ``match:{column, equals}`` 精确匹配行（与 ydf-browser 示例对齐）。
-    无法提取列信息时回退到 ``row_number`` / ``select_all:true``。
+    ★ 问题5：优先用 ``row_number`` 行号定位 —— 申请单号等业务单据号每次
+    运行动态生成，内容匹配在全新环境回放必然失败；行号在同等数据准备下
+    稳定。无行号信息时才回退到 ``match:{column, equals}`` 内容匹配。
 
     ★ 优先级：
-    1. 从 ``row_data`` 中选取唯一标识列构建 ``match``（最可靠）
-    2. 从 ``cell_text`` / ``column_header`` 构建 ``match``
-    3. 回退到 ``row_number``
-    4. 回退到 ``select_all:true``
+    1. ``editable_row_number``（JS 端提取的行号，最可靠）
+    2. 从 ``row_data`` 中选取唯一标识列构建 ``match``
+    3. 从 ``cell_text`` / ``column_header`` 构建 ``match``
+    4. 回退到 ``row_number: 1``（checkbox/switch change 场景）
+    5. 回退到 ``select_all:true``
     """
-    # 优先级 1：从 row_data 中选取唯一标识列
+    # 优先级 1：行号定位
+    for e in events:
+        row_num = e.target.editable_row_number
+        if row_num and row_num > 0:
+            return {"row_number": row_num}
+    # 优先级 2：从 row_data 中选取唯一标识列
     for e in events:
         if e.target.row_data:
             best = _pick_best_match_column(e.target.row_data)
             if best:
                 return {"match": {"column": best["column"], "equals": best["value"]}}
-    # 优先级 2：cell_text + column_header（原有逻辑）
+    # 优先级 3：cell_text + column_header（原有逻辑）
     for e in events:
         col = e.target.column_header
         val = e.target.cell_text or e.target.row_text
         if col and val:
             return {"match": {"column": col, "equals": val}}
-    # 回退 1：用 editable_row_number 精确指定行号（checkbox 场景的主要路径）
-    for e in events:
-        row_num = e.target.editable_row_number
-        if row_num and row_num > 0:
-            return {"row_number": row_num}
-    # 回退 2：有 value 说明是 checkbox/switch change，默认选第一行
+    # 回退 1：有 value 说明是 checkbox/switch change，默认选第一行
     for e in events:
         if e.target.value:
             return {"row_number": 1}
@@ -260,7 +311,16 @@ def _build_table_row_action(operation: str, events: list[RecordedEvent]) -> dict
 
 def _build_dialog(operation: str, events: list[RecordedEvent]) -> dict[str, Any]:
     label = (events[0].target.text or "").strip()
-    return {"label": label} if label else {}
+    result: dict[str, Any] = {"label": label} if label else {}
+    fid = (events[0].target.fieldid or "").strip()
+    if fid.endswith(("_modal_ok", "_modal")):
+        # ★ 参照选择器自身的确认按钮：form.fill 的参照流程可能已自动确认并
+        #   关闭选择器。回放时按 fieldid 定位该按钮：找不到（已被 fill 确认）
+        #   则跳过，避免误点外层弹窗的同名确定按钮
+        result["optional"] = True
+        if fid:
+            result["fieldid"] = fid
+    return result
 
 
 # ── 新增组件构建器 ─────────────────────────────────────────
@@ -281,26 +341,39 @@ def _build_action(operation: str, events: list[RecordedEvent]) -> dict[str, Any]
 def _build_attachment_upload(operation: str, events: list[RecordedEvent]) -> dict[str, Any]:
     """构建 attachment.upload target。
 
-    文件路径无法通过录制自动捕获，生成占位符供用户手动填写。
+    浏览器安全模型拿不到完整文件路径，只能通过后续 file change 事件拿到
+    文件名（converter._backfill_upload_filenames 回填），生成带文件名的
+    占位符供用户手动补全路径。
     """
     event = events[0]
     label = (event.target.text or "上传附件").strip()
+    fname = next(
+        (e.target.uploaded_file_name for e in events if e.target.uploaded_file_name),
+        None,
+    )
+    file_placeholder = f"<请填写文件路径: {fname}>" if fname else "<请填写文件路径>"
     return {
         "label": label,
-        "attachments": [{"type": "<请填写附件类型>", "file": "<请填写文件路径>"}],
+        "attachments": [{"type": "<请填写附件类型>", "file": file_placeholder}],
     }
 
 
 def _build_import_upload(operation: str, events: list[RecordedEvent]) -> dict[str, Any]:
     """构建 import.upload target。
 
-    文件路径无法通过录制自动捕获，生成占位符供用户手动填写。
+    浏览器安全模型拿不到完整文件路径，只能通过后续 file change 事件拿到
+    文件名（converter._backfill_upload_filenames 回填），生成带文件名的
+    占位符供用户手动补全路径。
     """
     event = events[0]
     label = (event.target.text or "导入").strip()
+    fname = next(
+        (e.target.uploaded_file_name for e in events if e.target.uploaded_file_name),
+        None,
+    )
     return {
         "label": label,
-        "file": "<请填写文件路径>",
+        "file": f"<请填写文件路径: {fname}>" if fname else "<请填写文件路径>",
     }
 
 
@@ -351,12 +424,80 @@ def _build_transfer_dialog(operation: str, events: list[RecordedEvent]) -> dict[
 
 
 def _build_notification(operation: str, events: list[RecordedEvent]) -> dict[str, Any]:
-    """构建 notification.close target。"""
+    """构建 notification.close / notification.assert target。"""
     event = events[0]
     label = (event.target.text or "").strip()
+    message = (event.target.notification_text or "").strip()
     result: dict[str, Any] = {}
+    if operation == "assert":
+        # 优先用通知正文；关闭按钮自身文本（常为 ×）无意义
+        if message:
+            result["contains"] = message
+        elif label:
+            result["contains"] = label
+        return result
     if label:
         result["label"] = label
+    if message:
+        # close target 允许 contains：回放端用于匹配要关闭的通知，避免误关
+        result["contains"] = message
+    return result
+
+
+def _build_form_assert(operation: str, events: list[RecordedEvent]) -> dict[str, Any]:
+    """构建 form.assert_values target：{fields: {字段名: 期望值}}。"""
+    event = events[0]
+    t = event.target
+    name = (t.label_text or t.aria_label or t.placeholder or t.fieldid or "").strip()
+    value = (t.value if t.value not in (None, "") else t.display_text) or ""
+    result: dict[str, Any] = {}
+    if name:
+        result["fields"] = {name: str(value)}
+    elif t.fieldid:
+        result["fieldid"] = t.fieldid
+        result["equals"] = str(value)
+    return result
+
+
+def _pick_unique_match_column(row_data: list[dict[str, str]]) -> tuple[str, str] | None:
+    """从行数据中选唯一标识列（优先编码/名称/ID 类列）。"""
+    priority = ("编码", "代码", "名称", "id", "ID", "号")
+    fallback: tuple[str, str] | None = None
+    for item in row_data:
+        col = (item.get("column") or "").strip()
+        val = (item.get("value") or "").strip()
+        if not col or not val:
+            continue
+        if fallback is None:
+            fallback = (col, val)
+        for kw in priority:
+            if kw in col:
+                return (col, val)
+    return fallback
+
+
+def _build_table_assert(operation: str, events: list[RecordedEvent]) -> dict[str, Any]:
+    """构建 table.assert_row_values target：{match, fields}（schema 必需两项）。"""
+    event = events[0]
+    t = event.target
+    row_data = t.row_data or []
+    result: dict[str, Any] = {}
+    match = _pick_unique_match_column(row_data)
+    if match:
+        result["match"] = {"column": match[0], "equals": match[1]}
+    fields = {
+        (item.get("column") or "").strip(): (item.get("value") or "").strip()
+        for item in row_data
+        if (item.get("column") or "").strip() and (item.get("value") or "").strip()
+    }
+    if fields:
+        result["fields"] = fields
+    if "match" not in result and t.cell_text and t.column_header:
+        result["match"] = {"column": t.column_header, "equals": t.cell_text}
+        result.setdefault("fields", {t.column_header: t.cell_text})
+    if not t.in_table:
+        # 非 table 检查点不应走到这里（classify 已分流），防御性返回空
+        return {}
     return result
 
 
@@ -624,6 +765,40 @@ def _build_table(operation: str, events: list[RecordedEvent]) -> dict[str, Any]:
     return result
 
 
+# ★ P1-7：工作流批量结果层统计字段解析（与回放端 _WORKFLOW_RESULT_SCAN_SCRIPT 对齐）
+_WORKFLOW_RESULT_COUNT_PATTERNS = {
+    "total": re.compile(r"(?:总数|总计|总条数|合计|共计|共)\s*[:：]?\s*(\d+)"),
+    "succeeded": re.compile(r"(?:成功数|成功条数|成功)\s*[:：]?\s*(\d+)"),
+    "failed": re.compile(r"(?:失败数|失败条数|失败)\s*[:：]?\s*(\d+)"),
+}
+
+
+def _parse_workflow_counts(text: str) -> dict[str, int]:
+    """从结果层文本解析 total/succeeded/failed 统计。"""
+    if not text:
+        return {}
+    counts: dict[str, int] = {}
+    for key, pattern in _WORKFLOW_RESULT_COUNT_PATTERNS.items():
+        m = pattern.search(text)
+        if m:
+            counts[key] = int(m.group(1))
+    return counts
+
+
+def _build_workflow_result(operation: str, events: list[RecordedEvent]) -> dict[str, Any]:
+    """构建 workflow_result target（P1-7）。
+
+    assert → 从结果层文本解析 total/succeeded/failed（回放端要求至少一个统计字段）；
+    confirm/details → {label: 按钮文本}（label 可省略）。
+    """
+    event = events[0]
+    if operation == "assert":
+        text = event.target.workflow_result_text or event.target.text or ""
+        return _parse_workflow_counts(text)
+    label = (event.target.text or "").strip()
+    return {"label": label} if label else {}
+
+
 _BUILDERS: dict[str, HandlerBuildTarget] = {
     "popup_reference": _build_popup_reference,
     "editable_table": _build_editable_table,
@@ -643,6 +818,7 @@ _BUILDERS: dict[str, HandlerBuildTarget] = {
     "amount_unit": _build_amount_unit,
     "transfer_dialog": _build_transfer_dialog,
     "notification": _build_notification,
+    "workflow_result": _build_workflow_result,
 }
 
 
@@ -733,11 +909,26 @@ def _recognize_import_download_template(event: RecordedEvent) -> str | None:
     return None
 
 
+def _recognize_workflow_result(event: RecordedEvent) -> str | None:
+    """P1-7：识别工作流批量结果层的确认/查看详情点击。"""
+    if event.type != "click" or not event.target.is_workflow_result:
+        return None
+    label = (event.target.text or "").strip()
+    if label in ("确认", "确定"):
+        return "confirm"
+    if label in ("查看详情", "详情"):
+        return "details"
+    return None
+
+
 def _recognize_dialog(event: RecordedEvent) -> str | None:
     if not (event.target.in_dialog and is_button_click(event)):
         return None
+    fid = (event.target.fieldid or "").strip()
     # 弹窗内表格的点击是选行/编辑，不是 dialog 按钮
-    if event.target.in_table:
+    # ★ 例外：参照选择器自身的确定/取消（fid 以 _modal_ok/_modal 结尾）
+    #   DOM 落在选择器表格区域内（in_table=True），需保留为 dialog.confirm
+    if event.target.in_table and not fid.endswith(("_modal_ok", "_modal")):
         return None
     # ★ 树选择器内的点击是选节点，不是 dialog 按钮
     # （由 _preprocess_form_interactions 模式 1/5 处理，未捕获则丢弃）
@@ -883,6 +1074,10 @@ def _recognize_form(event: RecordedEvent) -> str | None:
             return None
         if event.target.in_table and event.target.role in ("checkbox", "switch"):
             return None
+        # ★ 文件选择框的 change 事件不是 fill：文件名由 converter 回填到
+        #   前序 attachment.upload / import.upload 步骤（见 _enrich_upload_files）
+        if event.target.input_type == "file":
+            return None
         return "fill"
     return None
 
@@ -901,6 +1096,9 @@ def _recognize_editable_table(event: RecordedEvent) -> str | None:
             return None
         if event.target.role in ("checkbox", "switch"):
             return None
+        # ★ 文件选择框不作为可编辑单元格填充
+        if event.target.input_type == "file":
+            return None
         return "fill_row"
     return None
 
@@ -913,9 +1111,15 @@ def _recognize_toolbar_known(event: RecordedEvent) -> str | None:
 
 def _recognize_toolbar_fallback(event: RecordedEvent) -> str | None:
     # 兜底：非弹窗内的按钮类点击归 toolbar.click（弹窗内按钮走 dialog/特定 handler）
-    if is_button_click(event) and not event.target.in_dialog:
-        return "click"
-    return None
+    if not is_button_click(event) or event.target.in_dialog:
+        return None
+    # ★ 问题3修复：确定/确认/取消/关闭是弹窗按钮词汇。YonDiF 自定义弹窗
+    #   可能不设置 in_dialog 标志，导致弹窗按钮落到这里被误判为 toolbar。
+    #   真正的页面工具栏按钮由 region/known 路径识别，不会走到这里。
+    label = (event.target.text or "").strip()
+    if label in ("确定", "确认", "取消", "关闭", "OK", "Cancel"):
+        return None
+    return "click"
 
 
 def _recognize_form_fallback(event: RecordedEvent) -> str | None:
@@ -930,6 +1134,25 @@ def _recognize_form_fallback(event: RecordedEvent) -> str | None:
             return None
         if event.target.in_table and event.target.role in ("checkbox", "switch"):
             return None
+        # ★ 文件选择框的 change 事件不是 fill（文件名由 converter 回填）
+        if event.target.input_type == "file":
+            return None
+        return "fill"
+    # ★ Switch 开关组件（如"是否金库退付"）不在表格内时归 form.fill
+    #   YonDiF Switch 渲染为 div/span role="switch"，不是标准 input，
+    #   is_form_input 不覆盖，需要单独识别
+    if is_switch_toggle(event):
+        return "fill"
+    return None
+
+
+def _recognize_form_switch(event: RecordedEvent) -> str | None:
+    """识别 YDFSwitch / WUI Switch 开关组件的切换操作，归入 form.fill。
+
+    YDFSwitch 渲染为 ``<button class="wui-switch">``，click 事件会被
+    is_button_click / dialog handler 拦截，必须在它们之前识别。
+    """
+    if is_switch_toggle(event):
         return "fill"
     return None
 
@@ -955,7 +1178,13 @@ HANDLERS: list[ComponentHandler] = [
     ComponentHandler("popup_reference", _recognize_popup_reference),
     ComponentHandler("notification", _recognize_notification_close),
     ComponentHandler("transfer_dialog", _recognize_transfer_dialog),
+    # ★ P1-7：工作流批量结果层（flag 检测，最特异）—— 必须在 dialog 之前，
+    #   否则结果层的「确认」会被 dialog handler 抢走
+    ComponentHandler("workflow_result", _recognize_workflow_result),
     ComponentHandler("tab", _recognize_tab),
+    # ★ Switch 必须在 dialog 之前：YDFSwitch 是 button tag，
+    #   会被 dialog handler 误识别为弹窗按钮点击
+    ComponentHandler("form", _recognize_form_switch),
     ComponentHandler("dialog", _recognize_dialog),
     ComponentHandler("toolbar", _recognize_toolbar_region),
     ComponentHandler("action", _recognize_action),
@@ -980,11 +1209,24 @@ HANDLERS: list[ComponentHandler] = [
 def classify_event(event: RecordedEvent) -> tuple[str, str] | None:
     """将单个录制事件映射为 ``(component, operation)``，无映射时返回 None。
 
-    navigation / dialog_open / dialog_close 不产生组件步骤（由上层
-    open_menu / 合并阶段处理）。
+    navigation / dialog_open / dialog_close / hover 不产生组件步骤（由上层
+    open_menu / 合并阶段处理）。checkpoint 在入口处直接分流（见上）。
     """
     if event.type in ("navigation", "dialog_open", "dialog_close", "hover"):
         return None
+    # ★ 断言检查点（Alt+点击录制）：按目标位置分流到对应 assert 步骤
+    if event.type == "checkpoint":
+        t = event.target
+        if t.is_notification_close or t.notification_text:
+            return ("notification", "assert")
+        if t.in_table and (t.row_data or (t.cell_text and t.column_header)):
+            return ("table", "assert_row_values")
+        # ★ P1-7：结果层检查点 → 统计断言（回放端要求至少一个统计字段）
+        if t.is_workflow_result and _parse_workflow_counts(
+            t.workflow_result_text or t.text or ""
+        ):
+            return ("workflow_result", "assert")
+        return ("form", "assert_values")
     for handler in HANDLERS:
         operation = handler.recognize(event)
         if operation is not None:
@@ -1001,6 +1243,11 @@ def build_target(
     # add_row 是 editable_table 的特殊 operation，用专用 builder
     if component == "editable_table" and operation == "add_row":
         return _build_editable_table_add_row(operation, events)
+    # 断言步骤用专用 builder（与普通 fill/click 的 target 结构不同）
+    if component == "form" and operation == "assert_values":
+        return _build_form_assert(operation, events)
+    if component == "table" and operation == "assert_row_values":
+        return _build_table_assert(operation, events)
     # import 有两个 operation，用各自的 builder
     if component == "import" and operation == "download_template":
         return _build_import_download_template(operation, events)
@@ -1022,9 +1269,16 @@ def can_coalesce(
     """两个 ``(component, operation)`` 是否可合并为单个 step。
 
     ``editable_table.fill_row`` 额外要求同表同行才合并（避免跨行混填）。
+    ``form.fill`` 额外要求同一弹窗上下文才合并（避免跨弹窗覆盖）。
     """
     if a_pair != b_pair or a_pair not in _COALESCEABLE_PAIRS:
         return False
+    if a_pair in (("dialog", "confirm"), ("dialog", "cancel")):
+        # ★ 弹窗按钮去重：仅合并同一物理按钮的重复点击（mousedown+click 双发），
+        #   不同 fid 的确定（选择器 *_modal_ok 与外层 qd_btn）保持独立步骤
+        a_fid = (a_event.target.fieldid or "").strip()
+        b_fid = (b_event.target.fieldid or "").strip()
+        return bool(a_fid) and a_fid == b_fid
     if a_pair == ("editable_table", "fill_row"):
         # 优先用 inject JS 设置的 editable_row_number / editable_table_name
         a_row = a_event.target.editable_row_number
@@ -1049,4 +1303,30 @@ def can_coalesce(
             and a_row == b_row
             and a_table == b_table
         )
+    if a_pair == ("form", "fill"):
+        # ★ form.fill 跨弹窗上下文不合并：
+        #   用户先填主表单 → 打开弹窗操作 → 关闭弹窗后继续填主表单，
+        #   弹窗前后的 form.fill 不应合并（会覆盖前面的字段值）。
+        #   判断依据：两个事件的 in_dialog 状态必须一致。
+        if a_event.target.in_dialog != b_event.target.in_dialog:
+            return False
+        # ★ 跨 URL 页面不合并（如主表单 vs 弹窗内的独立页面）
+        a_url = a_event.context.url or ""
+        b_url = b_event.context.url or ""
+        if a_url and b_url and a_url != b_url:
+            return False
+        # ★ 跨页签不合并（问题2修复）：用户填 A 页签 → 切到 B 页签再填，
+        #   两侧的 form.fill 属于不同表单。若切换动作未被识别成步骤
+        #   （classify 为 None 被丢弃），此护栏防止两侧 fill 合并成一步
+        #   导致后填字段覆盖先填字段、页签切换丢失。
+        a_tab = a_event.context.active_tab or ""
+        b_tab = b_event.context.active_tab or ""
+        if a_tab != b_tab:
+            return False
+        # ★ 跨弹窗标题不合并（问题2修复）：同一 URL 下两个弹窗表单
+        #   （如向导式两步表单），dialog_title 变化即为表单边界。
+        a_dt = a_event.context.dialog_title or ""
+        b_dt = b_event.context.dialog_title or ""
+        if a_dt != b_dt:
+            return False
     return True
