@@ -8,3 +8,7 @@ build/
 reports/
 *.yaml.bak
 .venv/
+
+# 敏感环境配置文件 - 切勿提交
+config/env.yaml
+config/env.example
