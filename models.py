@@ -73,6 +73,16 @@ class RecordedEventTarget:
     # 通知组件正文文本（is_notification_close 时由 inject.js 提取，
     # 用于自动生成 notification.assert 步骤）
     notification_text: str | None = None
+    # ★ 设计器运行时元数据反查（inject.js 读 window.YonDiFGlobal 的 flatTree）。
+    # flatTree 同时按 key/divCode 索引 uidata 节点，可反查被操作元素的精确
+    # 组件注册名（如 YDFReferSelect，扩展组件为其自定义名）、节点类型、label、
+    # divCode 及祖先容器 divCode 链（嵌套同名控件消歧用）。
+    # 非 YonDiF 设计器渲染页 / 运行时未初始化时为 None（安全降级）。
+    uidata_name: str | None = None
+    uidata_node_type: str | None = None
+    uidata_label: str | None = None
+    uidata_div_code: str | None = None
+    uidata_container_path: list[str] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

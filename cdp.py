@@ -17,7 +17,9 @@
 from __future__ import annotations
 
 import json
+import os
 import time
+from pathlib import Path
 from typing import Any
 
 from .config import RecorderEnv
@@ -216,7 +218,20 @@ class RecorderRuntime:
     """录制器 Playwright 运行时（codegen 风格：目标窗口 + 独立检查器窗口）。
 
     目标窗口注入 RECORDER_JS 捕获事件；检查器窗口显示控制台与实时 YAML。
+
+    Args:
+        config: 环境配置。
+        menu_path: 录制前自动打开的中文菜单路径。
+        auto_login: 是否自动执行 CAS 登录。
+        browser_mode: 浏览器模式——
+            ``"builtin"`` 使用 Playwright 内置 Chromium（持久化用户数据目录，
+            保留 cookies / localStorage / session，下次启动免登录）；
+            ``"system"`` 使用 Playwright 内置 Chromium 临时模式（每次启动
+            全新 context，不保留状态，即原始行为）。
     """
+
+    # 持久化用户数据目录根路径（存放浏览器 profile 数据）
+    _USER_DATA_DIR = Path.home() / ".ydf-recorder" / "browser-profile"
 
     def __init__(
         self,
@@ -224,12 +239,14 @@ class RecorderRuntime:
         *,
         menu_path: str = "",
         auto_login: bool = True,
+        browser_mode: str = "builtin",
     ) -> None:
         self.config = config
         self._menu_path = menu_path.strip() if menu_path else ""
         self._auto_login = auto_login
+        self._browser_mode = browser_mode if browser_mode in ("builtin", "system") else "builtin"
         self._playwright = None
-        self._browser = None
+        self._browser = None          # 临时模式下存放 Browser 实例
         self._context = None
         self._page = None  # 目标页
         self._inspector_ctx = None
@@ -244,6 +261,8 @@ class RecorderRuntime:
         self._frame_watermarks: dict[int, int] = {}           # 每个 frame 已采集到的最大 seq
         self._service_code: str = ""  # 菜单解析得到的 serviceCode
         self._api_session = None  # requests.Session for API calls (aligned with ydf-browser)
+        # 持久化模式标记
+        self._is_persistent = (self._browser_mode == "builtin")
 
     # ── 启动 ──────────────────────────────────────────────────
 
@@ -253,24 +272,67 @@ class RecorderRuntime:
         如果配置了用户名/密码且 ``auto_login=True``，会自动执行 CAS 登录并
         注入 cookies；如果配置了 ``menu_path``，会解析菜单树并导航到目标
         服务页面。登录或菜单打开失败时降级为手动模式（仅打开 base_url）。
+
+        浏览器模式（``browser_mode`` 参数）：
+            - ``"builtin"`` — Playwright 内置 Chromium + 持久化用户数据目录
+              （保留 cookies / localStorage / session，下次启动免登录）。
+            - ``"system"`` — Playwright 内置 Chromium 临时模式（原始行为）。
         """
         from playwright.sync_api import sync_playwright
 
         self._playwright = sync_playwright().start()
-        self._browser = self._playwright.chromium.launch(
-            headless=False,
-            args=["--window-size=1440,900", "--window-position=0,0"],
-        )
 
-        # 目标窗口
-        self._context = self._browser.new_context(
-            locale="zh-CN",
-            accept_downloads=True,
-            viewport={"width": 1440, "height": 900},
-        )
+        if self._is_persistent:
+            # ── 内置浏览器模式：持久化用户数据目录 ──
+            # 同一个 profile 被多次 start 会导致锁冲突，先确保目录就绪
+            self._USER_DATA_DIR.mkdir(parents=True, exist_ok=True)
+            launch_args = [
+                "--window-size=1440,900",
+                "--window-position=0,0",
+                "--disable-blink-features=AutomationControlled",
+            ]
+            self._context = self._playwright.chromium.launch_persistent_context(
+                user_data_dir=str(self._USER_DATA_DIR),
+                headless=False,
+                locale="zh-CN",
+                accept_downloads=True,
+                viewport={"width": 1440, "height": 900},
+                args=launch_args,
+            )
+            # 持久化模式下 context 就是全部，不需要单独 browser 实例
+            self._browser = None
+            # 检查器窗口用另一个临时 browser（不持久化）
+            self._inspector_browser = self._playwright.chromium.launch(
+                headless=False,
+                args=["--window-size=560,900"],
+            )
+        else:
+            # ── 系统模式：临时 browser + context（原始行为） ──
+            self._browser = self._playwright.chromium.launch(
+                headless=False,
+                args=["--window-size=1440,900", "--window-position=0,0"],
+            )
+            self._context = self._browser.new_context(
+                locale="zh-CN",
+                accept_downloads=True,
+                viewport={"width": 1440, "height": 900},
+            )
+            self._inspector_browser = self._browser
+
         # ★ 设置默认超时，防止页面加载中 evaluate 长时间阻塞
         self._context.set_default_timeout(10000)
-        self._page = self._context.new_page()
+
+        # 目标页：持久化模式下可能已有打开的页面（上次遗留），复用或新建
+        if self._is_persistent and self._context.pages:
+            self._page = self._context.pages[0]
+            # 如果有多余页面（上次遗留多个标签），关闭多余的只保留第一个
+            for extra in self._context.pages[1:]:
+                try:
+                    extra.close()
+                except Exception:
+                    pass
+        else:
+            self._page = self._context.new_page()
         self._page.on("frameattached", self._on_frame_attached)
 
         # ── 环境准备：登录 + 打开菜单 ──
@@ -281,7 +343,7 @@ class RecorderRuntime:
         self._dismiss_cookie_all_frames()
 
         # 检查器窗口（独立 context = 独立 OS 窗口）
-        self._inspector_ctx = self._browser.new_context(
+        self._inspector_ctx = self._inspector_browser.new_context(
             viewport={"width": 560, "height": 900}
         )
         self._inspector = self._inspector_ctx.new_page()
@@ -315,17 +377,28 @@ class RecorderRuntime:
     # ── 环境准备：登录 + 打开菜单 ──────────────────────────────
 
     def _prepare_environment(self) -> None:
-        """登录并导航到目标菜单（如果配置了），失败时降级为手动模式。"""
+        """登录并导航到目标菜单（如果配置了），失败时降级为手动模式。
+
+        持久化模式下优先复用上次保存的登录态：先导航到 ``base_url``，
+        检测是否仍处于登录状态（未跳转到 CAS 登录页），如果是则跳过
+        CAS 登录，直接进入菜单打开流程。否则降级为 CAS 登录。
+        """
         login_ok = False
         if self._auto_login and self.config.username and self.config.password:
-            try:
-                self._do_login()
-                login_ok = True
-            except Exception as exc:
-                print(
-                    f"[ydf-recorder] ⚠️ 自动登录失败: {exc}，降级为手动登录",
-                    flush=True,
-                )
+            if self._is_persistent:
+                # 持久化模式：先检测已有 session 是否有效
+                login_ok = self._try_reuse_session()
+                if login_ok:
+                    print("[ydf-recorder] 持久化 session 有效，跳过 CAS 登录", flush=True)
+            if not login_ok:
+                try:
+                    self._do_login()
+                    login_ok = True
+                except Exception as exc:
+                    print(
+                        f"[ydf-recorder] ⚠️ 自动登录失败: {exc}，降级为手动登录",
+                        flush=True,
+                    )
 
         if not login_ok:
             self._page.goto(self.config.base_url, wait_until="domcontentloaded")
@@ -338,6 +411,33 @@ class RecorderRuntime:
                     f"[ydf-recorder] ⚠️ 打开菜单失败: {exc}，请手动导航到目标页面",
                     flush=True,
                 )
+
+    def _try_reuse_session(self) -> bool:
+        """持久化模式下尝试复用上次保存的登录态。
+
+        导航到 ``base_url``，如果最终 URL 没有跳转到 CAS 登录页
+        （URL 不含 ``/cas`` 或 ``login``），且页面中不存在登录表单，
+        则认为 session 有效，返回 ``True``。否则返回 ``False``。
+        """
+        try:
+            self._page.goto(self.config.base_url, wait_until="domcontentloaded")
+            # 等待 SPA 渲染（给一个短超时）
+            try:
+                self._page.wait_for_load_state("networkidle", timeout=8000)
+            except Exception:
+                pass
+            current_url = self._page.url or ""
+            # CAS 登录页特征：URL 含 /cas 或 login
+            url_lower = current_url.lower()
+            if "/cas" in url_lower or "login" in url_lower:
+                return False
+            # 检查页面上是否有 CAS 登录表单
+            has_login_form = self._page.query_selector(
+                "input[type='password']"
+            ) is not None
+            return not has_login_form
+        except Exception:
+            return False
 
     def _do_login(self) -> None:
         """执行 CAS 登录，将 session cookies 注入 Playwright 浏览器上下文。
@@ -895,10 +995,19 @@ class RecorderRuntime:
         return resolve_menu_path_from_tree(payload, service_code)
 
     def stop(self) -> None:
-        """关闭检查器、目标上下文与浏览器，清理资源。"""
+        """关闭检查器、目标上下文与浏览器，清理资源。
+
+        持久化模式下，关闭 context 即保存用户数据（cookies / localStorage
+        等持久化到 profile 目录，下次启动自动恢复）。
+        """
+        # 持久化模式下 _inspector_browser 是独立 browser；临时模式下同 _browser
+        inspector_browser = getattr(self, "_inspector_browser", None)
+        is_separate = self._is_persistent and inspector_browser is not None
         for closer in (
             lambda: self._inspector_ctx.close() if self._inspector_ctx else None,
             lambda: self._context.close() if self._context else None,
+            # 持久化模式下额外关闭检查器 browser
+            lambda: inspector_browser.close() if is_separate and inspector_browser else None,
             lambda: self._browser.close() if self._browser else None,
             lambda: self._playwright.stop() if self._playwright else None,
         ):

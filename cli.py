@@ -14,6 +14,12 @@ service_tree 得到中文菜单路径。
   # 跳过自动登录（手动登录）
   ydf-recorder --env ydf --no-login --output suite.yaml
 
+  # 使用内置浏览器（持久化用户数据，免重复登录）
+  ydf-recorder --env ydf --browser builtin --output suite.yaml
+
+  # 使用系统临时浏览器（原始行为，不保留状态）
+  ydf-recorder --env ydf --browser system --output suite.yaml
+
   # 从已有事件文件转换
   ydf-recorder --from-events events.json --output suite.yaml
 """
@@ -29,6 +35,7 @@ from datetime import datetime
 from pathlib import Path
 
 from ._version import __version__
+from . import replay as _replay
 from .cdp import RecorderRuntime
 from .config import RecorderEnv, load_recorder_env
 from .converter import build_dsl_document, dsl_to_yaml, load_events_from_json, load_events_from_jsonl
@@ -80,10 +87,69 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _add_record_args(record_parser)
 
+    # ── replay / validate / install-ydf-browser（内嵌 ydf-browser 运行时） ──
+    replay_parser = subparsers.add_parser(
+        "replay", help="用内嵌的 ydf-browser 运行时回放 DSL YAML",
+        description=(
+            "用内嵌的 ydf-browser 运行时（.ydf-browser-runtime/）真实回放录制的用例："
+            "登录 → 打开菜单 → 逐步执行 → 输出 JSON 结果摘要。\n"
+            "首次使用先执行 ydf-recorder install-ydf-browser 构建运行时。"
+        ),
+    )
+    _add_replay_args(replay_parser, include_browser_flags=True)
+
+    validate_parser = subparsers.add_parser(
+        "validate", help="校验 DSL YAML（不开浏览器，秒级）",
+        description="用内嵌的 ydf-browser 运行时校验 YAML 结构与上下文，不启动浏览器",
+    )
+    _add_replay_args(validate_parser, include_browser_flags=False)
+
+    install_parser = subparsers.add_parser(
+        "install-ydf-browser", help="从源码构建内嵌回放运行时 venv",
+        description=(
+            "从 vendor/ydf-browser（子模块）或 ../ydf-browser 源码构建独立运行时 venv"
+            "（.ydf-browser-runtime/），避免与 recorder 的 playwright 版本互相污染"
+        ),
+    )
+    install_parser.add_argument(
+        "--source", default=None, metavar="DIR",
+        help="ydf-browser 源码目录（默认自动发现：vendor/ydf-browser → ./ydf-browser → ../ydf-browser）",
+    )
+    install_parser.add_argument(
+        "--with-browsers", dest="with_browsers", action="store_true", default=False,
+        help="安装后额外执行 playwright install chromium",
+    )
+
     # ── 无子命令时，顶层参数也支持录制（向后兼容） ──
     _add_record_args(parser)
 
     return parser
+
+
+def _add_replay_args(parser: argparse.ArgumentParser, include_browser_flags: bool) -> None:
+    """为 replay/validate 子命令添加参数（与 ydf-browser CLI 对齐）。"""
+    parser.add_argument("yaml", help="DSL YAML 文件路径")
+    parser.add_argument("--env", default="ydf", help="环境名称（对应 config/env.yaml 中的 key）")
+    parser.add_argument(
+        "--config", default=None,
+        help="ydf-browser 配置文件路径（默认用 recorder 的 config/env.yaml，两者 schema 兼容）",
+    )
+    parser.add_argument("--case", action="append", default=[], metavar="CODE", help="只跑指定用例编码（可重复）")
+    parser.add_argument("--case-glob", action="append", default=[], metavar="GLOB", help="用例编码 glob 过滤（可重复）")
+    parser.add_argument("--grep", default=None, help="按名称/描述关键字过滤用例")
+    parser.add_argument("--tag", action="append", default=[], metavar="TAG", help="按标签过滤用例（可重复）")
+    parser.add_argument("--vars-file", action="append", default=[], metavar="FILE", help="外部变量文件（可重复）")
+    parser.add_argument(
+        "--summary-only", dest="summary_only", action="store_true", default=False,
+        help="只输出最终 JSON 摘要，不透传过程日志",
+    )
+    if include_browser_flags:
+        parser.add_argument("--headless", action="store_true", default=False, help="无头模式运行浏览器")
+        parser.add_argument("--force-login", action="store_true", default=False, help="忽略已有登录态强制重新登录")
+        parser.add_argument(
+            "--no-persistent-profile", dest="no_persistent_profile", action="store_true", default=False,
+            help="不使用持久化浏览器 profile",
+        )
 
 
 def _add_record_args(parser: argparse.ArgumentParser) -> None:
@@ -133,6 +199,15 @@ def _add_record_args(parser: argparse.ArgumentParser) -> None:
         "--abstract-values", dest="abstract_values", action="store_true", default=False,
         help="自动将硬编码值替换为 {{random.*}} 变量",
     )
+    parser.add_argument(
+        "--browser", dest="browser", default="builtin",
+        choices=["builtin", "system"],
+        help=(
+            "浏览器模式：builtin（默认，内置 Chromium 持久化用户数据目录，"
+            "保留 cookies/session，下次启动免登录）；"
+            "system（临时 Chromium，每次全新，不保留状态）"
+        ),
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -141,6 +216,27 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "bump":
         return _cmd_bump(args)
+
+    if args.command == "replay":
+        try:
+            return _replay.handle_replay(args)
+        except Exception as exc:
+            _print_human_error(str(exc))
+            return 1
+
+    if args.command == "validate":
+        try:
+            return _replay.handle_validate(args)
+        except Exception as exc:
+            _print_human_error(str(exc))
+            return 1
+
+    if args.command == "install-ydf-browser":
+        try:
+            return _replay.handle_install(args)
+        except Exception as exc:
+            _print_human_error(str(exc))
+            return 1
 
     # record 子命令或无子命令（向后兼容）
     try:
@@ -451,6 +547,7 @@ def _convert_from_events(args: argparse.Namespace, output_path: str) -> int:
         "events": len(events),
     })
     _log_progress(f"record: DSL 已写入 {output_path}")
+    _log_replay_hints(output_path)
     return 0
 
 
@@ -477,6 +574,7 @@ def _record_from_browser(args: argparse.Namespace, output_path: str) -> int:
         env,
         menu_path=menu_path_arg,
         auto_login=auto_login,
+        browser_mode=getattr(args, "browser", "builtin"),
     )
     menu_path: str | None = menu_path_arg or None
     raw_events: list[dict] = []
@@ -543,6 +641,7 @@ def _record_from_browser(args: argparse.Namespace, output_path: str) -> int:
         f"record: {len(events)} 个事件 → "
         f"{len(document.cases[0].steps) if document.cases else 0} 个步骤 → {output_path}"
     )
+    _log_replay_hints(output_path)
     return 0
 
 
@@ -551,6 +650,12 @@ def _record_from_browser(args: argparse.Namespace, output_path: str) -> int:
 def _log_progress(message: str) -> None:
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     print(f"[ydf-recorder] time={now} {message}", file=sys.stderr, flush=True)
+
+
+def _log_replay_hints(output_path: str) -> None:
+    """录制完成后提示内嵌回放入口（闭环：录制 → 校验 → 回放）。"""
+    _log_progress(f"record: 校验用例: ydf-recorder validate {output_path}")
+    _log_progress(f"record: 回放验证: ydf-recorder replay {output_path} --headless")
 
 
 def _print_human_error(message: str) -> None:

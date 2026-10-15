@@ -1,6 +1,6 @@
 # CLI 参数完整参考
 
-> 本文件由 README.md 引用，包含 `ydf-recorder` 全部 17 个 CLI 参数的详细说明。
+> 本文件由 README.md 引用，包含 `ydf-recorder` 全部 21 个 CLI 参数的详细说明。
 
 ## 用法
 
@@ -12,6 +12,11 @@ ydf-recorder record [OPTIONS]
 # 版本管理
 ydf-recorder bump 1.2.3               # 指定版本号 + 生成 tar.gz
 ydf-recorder bump patch|minor|major   # 自动递增 + 生成 tar.gz
+
+# 内嵌回放（录制 → 校验 → 回放 闭环）
+ydf-recorder install-ydf-browser [--source DIR] [--with-browsers]
+ydf-recorder validate <yaml> [OPTIONS]
+ydf-recorder replay <yaml> [OPTIONS]
 ```
 
 ## 全局参数
@@ -38,13 +43,36 @@ ydf-recorder bump patch|minor|major   # 自动递增 + 生成 tar.gz
 | 13 | `--abstract-values` | `false` | 自动将硬编码值替换为 `{{random.*}}` 变量 |
 | 14 | `--from-events EVENTS_FILE` | （无） | 从已有事件文件（JSON/JSONL）转换，不启动浏览器 |
 | 15 | `--headed` | `true` | 显示浏览器窗口（录制时默认开启） |
+| 16 | `--browser MODE` | `builtin` | 浏览器模式：`builtin`（内置 Chromium 持久化用户数据目录，保留 cookies/session）或 `system`（临时 Chromium，不保留状态） |
 
 ## bump 子命令参数
 
 | # | 参数 | 默认值 | 说明 |
 |---|------|--------|------|
-| 16 | `--no-install` | `false` | 不执行安装（默认使用 `uv pip install` 或 `pip install`） |
-| 17 | `--no-build` | `false` | 不构建 `.tar.gz` 发布包 |
+| 15 | `version` | （必填） | 版本号：直接指定或 `patch`/`minor`/`major` 自动递增 |
+| 16 | `--no-build` | 关 | 只改版本号，不构建 tar.gz |
+| 17 | `--no-install` | 关 | 不执行安装 |
+
+## replay / validate / install-ydf-browser 子命令（内嵌 ydf-browser 运行时）
+
+三者共用 `ydf_recorder/replay.py` 的运行时发现逻辑：`YDF_BROWSER_BIN` 环境变量 → `.ydf-browser-runtime/` venv → PATH 上的 `ydf-browser` → 当前解释器可 import。源码目录查找顺序：`vendor/ydf-browser`（git submodule）→ `./ydf-browser` → `../ydf-browser`。
+
+### install-ydf-browser
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `--source DIR` | 自动发现 | ydf-browser 源码目录 |
+| `--with-browsers` | 关 | 构建后额外执行 `playwright install chromium` |
+
+### validate <yaml>
+
+不开浏览器的秒级校验：`--env NAME`（默认 ydf）、`--config PATH`（默认 recorder 的 `config/env.yaml`，与 ydf-browser schema 兼容）、`--case CODE`、`--case-glob GLOB`、`--grep KEYWORD`、`--tag TAG`、`--vars-file FILE`（均可重复）、`--summary-only`（只输出最终 JSON）。
+
+### replay <yaml>
+
+真实回放（登录 → 开菜单 → 逐步执行 → JSON 结果摘要），在 validate 参数基础上额外支持：`--headless`、`--force-login`、`--no-persistent-profile`。
+
+> 依赖隔离：ydf-browser 钳定 `playwright==1.61.0`，recorder venv 是 `>=1.52`，因此回放运行时装在独立 venv（`.ydf-browser-runtime/`，已 gitignore），以子进程调用，互不污染。
 
 > `bump` 还需要一个位置参数 `version`：可直接指定版本号（如 `1.2.3`），或用 `patch` / `minor` / `major` 自动递增。
 
@@ -73,6 +101,16 @@ ydf-recorder --env ydf --output suite.yaml
 
 # 跳过自动登录（手动登录）
 ydf-recorder --env ydf --no-login --output suite.yaml
+```
+
+### 选择浏览器模式
+
+```bash
+# 内置浏览器（默认）：持久化用户数据目录，保留 cookies/session，下次启动免登录
+ydf-recorder --env ydf --browser builtin --output suite.yaml
+
+# 系统临时浏览器：每次全新，不保留状态（原始行为）
+ydf-recorder --env ydf --browser system --output suite.yaml
 ```
 
 ### 从事件文件重新转换

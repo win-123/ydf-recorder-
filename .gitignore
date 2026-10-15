@@ -9,6 +9,9 @@ reports/
 *.yaml.bak
 .venv/
 
+# 内嵌 ydf-browser 回放运行时（install-ydf-browser 生成，不提交）
+.ydf-browser-runtime/
+
 # 敏感环境配置文件 - 切勿提交
 config/env.yaml
 config/env.example

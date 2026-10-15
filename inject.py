@@ -70,6 +70,94 @@ RECORDER_JS = r"""
     return null;
   }
 
+  // ── 设计器运行时元数据反查（flatTree）─────────────────────────
+  // YonDiF 单据页由 ydf-builder 设计器渲染，运行时把 uidata 解析树暴露在
+  // window.YonDiFGlobal：ht.setItem('flatTree', ...) 写入的平铺映射同时按
+  // key 和 divCode 索引节点，节点含 name(组件注册名如 YDFReferSelect)/
+  // nodeType/label/divCode/parentKey/parentKeys。注入脚本可直接反查被操作
+  // 元素的精确组件元信息，不依赖 CSS class 启发式——扩展组件（window.ydfui
+  // 动态注册）与自绘 DOM 同样能命中。运行时不可用时安全降级返回 null。
+  var _flatTreeCache = null;
+  var _flatTreeCacheTs = 0;
+  var FLAT_TREE_TTL_MS = 1000; // flatTree 会在 refreshUIData 时重建，短 TTL 缓存兼顾准确性与开销
+
+  function getRuntimeFlatTree() {
+    var now = nowMs();
+    if (_flatTreeCache && (now - _flatTreeCacheTs) < FLAT_TREE_TTL_MS) return _flatTreeCache;
+    _flatTreeCache = null;
+    _flatTreeCacheTs = now;
+    try {
+      var g = window.YonDiFGlobal;
+      if (g && typeof g.getLocalItem === 'function') {
+        var ft = g.getLocalItem('flatTree');
+        // flatTree 是 {key|divCode: node} 映射，节点必有 name 字段
+        if (ft && typeof ft === 'object' && !Array.isArray(ft)) _flatTreeCache = ft;
+      }
+    } catch (e) { /* 运行时未就绪/非 YonDiF 页面：静默降级 */ }
+    return _flatTreeCache;
+  }
+
+  // 从元素向上沿属性链找第一个能在 flatTree 中命中的节点。
+  // 可编辑表格单元格的 fieldid 是三段式（<表divCode>_<列>_<行号>），直接查不中，
+  // 必须向上爬到携带原始 divCode 的容器节点。
+  function findUidataNode(el, ft) {
+    var node = el;
+    var depth = 0;
+    while (node && node.nodeType === 1 && node !== document.body && depth < 8) {
+      var fid = node.getAttribute('fieldid') || node.getAttribute('data-fieldid');
+      if (fid && ft[fid] && ft[fid].name) return ft[fid];
+      var uikey = node.getAttribute('uikey');
+      if (uikey && ft[uikey] && ft[uikey].name) return ft[uikey];
+      node = node.parentElement;
+      depth++;
+    }
+    return null;
+  }
+
+  // 祖先容器 divCode 链（root → 直接父容器）。设计器保证 divCode 模板内唯一，
+  // 嵌套容器（卡片/页签/抽屉）里同名控件靠这条链消歧。
+  function getUidataInfo(el) {
+    try {
+      var ft = getRuntimeFlatTree();
+      if (!ft) return null;
+      var node = findUidataNode(el, ft);
+      if (!node) return null;
+      var path = [];
+      var parentKeys = node.parentKeys;
+      if (parentKeys && parentKeys.length) {
+        var max = Math.min(parentKeys.length, 8);
+        for (var i = 0; i < max; i++) {
+          var p = ft[parentKeys[i]];
+          if (p && p.divCode) path.push(String(p.divCode));
+        }
+      }
+      return {
+        name: node.name || null,
+        node_type: node.nodeType || null,
+        label: node.label || null,
+        div_code: node.divCode || null,
+        container_path: path.length ? path : null
+      };
+    } catch (e) { return null; }
+  }
+
+  // flatTree 组件注册名 → widget_type 兜底映射（启发式未命中时使用，保守收录）
+  var YDF_NAME_WIDGET_TYPE = {
+    YDFInput: 'input', YDFInputNumber: 'input', YDFInputNumberRange: 'input',
+    YDFTextArea: 'textarea', YDFSelect: 'select', YDFTreeSelect: 'select',
+    YDFCascader: 'select', YDFDatePicker: 'date', YDFDateRange: 'date',
+    YDFReferSelect: 'refer', YDFReferButton: 'refer',
+    YDFTableModalSelect: 'refer', YDFTreeModalSelect: 'refer',
+    YDFCheckbox: 'checkbox', YDFCheckboxGroup: 'checkbox', YDFRadio: 'radio',
+    YDFSwitch: 'switch', YDFUploadButton: 'upload', YDFileImportButton: 'upload',
+    YDFImportDropdownButton: 'upload', YDFBraftEditor: 'richtext',
+    YDFCodeMirror: 'richtext', YDFRemarks: 'richtext',
+    YDFTree: 'tree', YDFTreeNext: 'tree',
+    YDFTable: 'table', LCDTable: 'table', YDFQueryTabs: 'tab',
+    YDFButton: 'button', YDFIconButton: 'button', YDFDropdownButton: 'button',
+    YDFColorPicker: 'input', YDFFontPicker: 'input', YDFFormula: 'input'
+  };
+
   function getLabelText(el) {
     // 尝试通过 aria-labelledby 找到 label
     var labelledBy = el.getAttribute('aria-labelledby');
@@ -156,9 +244,38 @@ RECORDER_JS = r"""
     return 'content_card';
   }
 
+  // fieldid 在 DOM 中重复时（嵌套容器内同名 divCode / 可编辑表格三段式
+  // fieldid 每行一个），沿祖先 [fieldid] 链构造「容器 fieldid 后代 fieldid」
+  // 组合选择器。设计器保证 divCode 模板内唯一，祖先链组合可稳定消歧。
+  // 只有在组合选择器经 querySelectorAll 验证唯一时才返回，否则保持原单
+  // fieldid 选择器（不引入不确定的新语义）。
+  function buildFieldidSelector(el, fid) {
+    var single = '[fieldid="' + fid + '"]';
+    var matches = null;
+    try { matches = document.querySelectorAll(single + ', [data-fieldid="' + fid + '"]'); } catch (e) {}
+    if (!matches || matches.length <= 1) return single;
+    var parts = [single];
+    var node = el;
+    for (var depth = 0; depth < 5; depth++) {
+      var ancestor = node.parentElement ? node.parentElement.closest('[fieldid]') : null;
+      if (!ancestor) break;
+      var afid = ancestor.getAttribute('fieldid');
+      if (afid && afid !== fid) {
+        parts.unshift('[fieldid="' + afid + '"]');
+        var prefix = parts.join(' ');
+        try {
+          var combined = prefix + ' [fieldid="' + fid + '"], ' + prefix + ' [data-fieldid="' + fid + '"]';
+          if (document.querySelectorAll(combined).length === 1) return combined;
+        } catch (e) {}
+      }
+      node = ancestor;
+    }
+    return single; // 祖先链仍不能唯一：保持旧行为，由 row_data/match 定位兜底
+  }
+
   function buildSelector(el) {
     var fid = el.getAttribute('fieldid') || el.getAttribute('data-fieldid');
-    if (fid) return '[fieldid="' + fid + '"]';
+    if (fid) return buildFieldidSelector(el, fid);
 
     var uikey = el.getAttribute('uikey');
     if (uikey) return '[uikey="' + uikey + '"]';
@@ -724,6 +841,11 @@ function isNotificationClose(el) {
       if (isReferenceTrigger(el)) return 'refer';
       if (tag === 'TEXTAREA') return 'textarea';
       if (tag === 'INPUT') return 'input';
+      // 启发式未命中：flatTree 反查设计器组件注册名兜底。
+      // 扩展组件（window.ydfui 注册）与自绘 DOM 不带已知 class，
+      // 只有这条通道能给出准确类型。
+      var ui = getUidataInfo(el);
+      if (ui && ui.name && YDF_NAME_WIDGET_TYPE[ui.name]) return YDF_NAME_WIDGET_TYPE[ui.name];
       return null;
     } catch (e) { return null; }
   }
@@ -802,6 +924,10 @@ function isNotificationClose(el) {
     // ★ P1-7：工作流批量结果层信号（confirm/details 点击与 Alt+检查点断言用）
     var wfLayer = findWorkflowResultLayer(el);
 
+    // ★ 设计器运行时元数据反查（flatTree）：精确组件名/节点类型/容器路径。
+    // 不论启发式是否命中都采集——Python/转换层可据此做嵌套消歧与类型校正。
+    var uidataInfo = getUidataInfo(el);
+
     return {
       fieldid: getFieldId(el) || null,
       label_text: getLabelText(el) || null,
@@ -861,7 +987,15 @@ function isNotificationClose(el) {
         var wt = detectWidgetType(el);
         if (inDateDd) return 'date_cell';
         return wt;
-      })()
+      })(),
+      // ★ 设计器运行时元数据（flatTree 反查）：
+      // uidata_name = 组件注册名（如 YDFReferSelect，扩展组件为其自定义名）
+      // uidata_container_path = 祖先容器 divCode 链（root→直接父容器，嵌套消歧用）
+      uidata_name: uidataInfo ? uidataInfo.name : null,
+      uidata_node_type: uidataInfo ? uidataInfo.node_type : null,
+      uidata_label: uidataInfo ? uidataInfo.label : null,
+      uidata_div_code: uidataInfo ? uidataInfo.div_code : null,
+      uidata_container_path: uidataInfo ? uidataInfo.container_path : null
     };
   }
 
@@ -1577,6 +1711,18 @@ function isNotificationClose(el) {
   });
 
   // ── public API ────────────────────────────────────────────
+
+  // 调试：flatTree 反查能力状态（运行时是否可用、可索引的节点数）。
+  // 在 DevTools console 执行 __ydf_recorder_uidata_status() 即可确认
+  // 本页的设计器元数据通道是否生效（不可用 = 非设计器渲染页/未初始化）。
+  window.__ydf_recorder_uidata_status = function () {
+    var ft = getRuntimeFlatTree();
+    var count = 0;
+    if (ft) {
+      try { count = Object.keys(ft).length; } catch (e) {}
+    }
+    return { available: !!ft, node_index_count: count };
+  };
 
   window.__ydf_recorder_dump = function () {
     return JSON.parse(JSON.stringify(events));

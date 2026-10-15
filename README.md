@@ -12,7 +12,7 @@ YonDiF 浏览器操作录制器 — 录制用户在浏览器中的操作，实�
 - **表头筛选兼容**：自动识别表格列头筛选输入框，避免误分类为可编辑表格单元格
 - **事件合成**：将多步交互（如"点击参照字段 → 选树节点"）合成为单个 DSL 步骤
 - **噪声过滤**：自动过滤聚焦点击、重复点击、空标签选择等无效操作
-- **完全解耦**：不依赖 ydf-browser 任何模块，通过 YAML 文件协作
+- **内嵌回放运行时**：以 git submodule 方式内嵌 ydf-browser，录制后可直接 `validate` / `replay` 闭环验证（独立运行时 venv，依赖互不污染）
 
 ## 安装
 
@@ -181,7 +181,7 @@ ydf-recorder --env ydf --no-login --output suite.yaml
 
 ## CLI 参数
 
-共 17 个 CLI 参数（含 record 子命令 14 个、bump 子命令 2 个、全局 1 个），详见 **[CLI 参数完整参考](docs/CLI_REFERENCE.md)**。
+共 21 个 CLI 参数（含 record 子命令 15 个、replay/validate 子命令、bump 子命令 2 个、全局 1 个），详见 **[CLI 参数完整参考](docs/CLI_REFERENCE.md)**。
 
 快速预览：
 
@@ -193,7 +193,27 @@ ydf-recorder record [OPTIONS]
 # 版本管理
 ydf-recorder bump 1.2.3               # 指定版本号 + 生成 tar.gz
 ydf-recorder bump patch|minor|major   # 自动递增 + 生成 tar.gz
+
+# 内嵌回放（录制 → 校验 → 回放 闭环）
+ydf-recorder install-ydf-browser      # 首次使用：从子模块源码构建回放运行时
+ydf-recorder validate suite.yaml      # 秒级校验 YAML（不开浏览器）
+ydf-recorder replay suite.yaml --headless   # 真实回放验证
 ```
+
+### 内嵌 ydf-browser（回放运行时）
+
+recorder 通过 **git submodule** 内嵌 ydf-browser 源码，实现录制后闭环回放：
+
+```bash
+# 首次挂接子模块（ydf-browser 推为独立仓库后执行一次）
+git submodule add <ydf-browser-repo-url> vendor/ydf-browser
+git clone --recurse-submodules <ydf-recorder-url>   # 克隆时同步拉取子模块
+
+# 构建运行时 venv（.ydf-browser-runtime/，已 gitignore）
+ydf-recorder install-ydf-browser --with-browsers
+```
+
+源码目录查找顺序：`vendor/ydf-browser`（子模块）→ `./ydf-browser` → `../ydf-browser`（兄弟目录开发布局）。运行时可执行文件发现顺序：`YDF_BROWSER_BIN` 环境变量 → 运行时 venv → PATH → 当前解释器。回放运行时与 recorder 依赖完全隔离（ydf-browser 钳定 playwright==1.61.0，recorder 用独立 venv 调子进程，互不污染）。
 
 常用参数速查：
 
@@ -206,6 +226,10 @@ ydf-recorder bump patch|minor|major   # 自动递增 + 生成 tar.gz
 | `--no-login` | 跳过自动登录 |
 | `--from-events FILE` | 从事件文件转换，不启动浏览器 |
 | `--abstract-values` | 硬编码值替换为 `{{random.*}}` 变量 |
+| `--browser MODE` | 浏览器模式：`builtin`（默认，内置 Chromium 持久化用户数据目录）或 `system`（临时 Chromium） |
+| `replay <yaml>` | 用内嵌运行时真实回放（`--headless`/`--force-login`/`--case`/`--summary-only` 等） |
+| `validate <yaml>` | 秒级校验 YAML（不开浏览器，`--case`/`--grep` 过滤） |
+| `install-ydf-browser` | 从子模块源码构建回放运行时 venv（`--with-browsers` 顺带装 Chromium） |
 | `--version` | 显示版本号 |
 
 > 完整参数列表（含 `--suite-code`、`--suite-name`、`--tenant`、`--default-org`、`--fiscal-year`、`--user`、`--headed`、`--no-build`、`--no-install`）及优先级说明，请参阅 [docs/CLI_REFERENCE.md](docs/CLI_REFERENCE.md)。
