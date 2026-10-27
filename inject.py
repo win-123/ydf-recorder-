@@ -100,14 +100,33 @@ RECORDER_JS = r"""
   // 从元素向上沿属性链找第一个能在 flatTree 中命中的节点。
   // 可编辑表格单元格的 fieldid 是三段式（<表divCode>_<列>_<行号>），直接查不中，
   // 必须向上爬到携带原始 divCode 的容器节点。
+  // ★ 二次扩展组件定位（与 pvdf-fe 源码 LayoutItem/UIParser 对齐）：
+  //   扩展组件常不透传 fieldid，唯一稳定锚点是 LayoutItem 外壳——
+  //   id/class `wx-<key>`（key 即 flatTree 索引）、fieldid `<divCode>_drag`、
+  //   formItem 的 class `wx-item-<组件name>`。三类锚点在此统一解析。
   function findUidataNode(el, ft) {
     var node = el;
     var depth = 0;
-    while (node && node.nodeType === 1 && node !== document.body && depth < 8) {
+    while (node && node.nodeType === 1 && node !== document.body && depth < 12) {
       var fid = node.getAttribute('fieldid') || node.getAttribute('data-fieldid');
-      if (fid && ft[fid] && ft[fid].name) return ft[fid];
+      if (fid) {
+        if (ft[fid] && ft[fid].name) return ft[fid];
+        // LayoutItem 外壳的 fieldid 是 <divCode>_drag，剥离后缀再查
+        if (/_drag$/.test(fid)) {
+          var base = fid.replace(/_drag$/, '');
+          if (ft[base] && ft[base].name) return ft[base];
+        }
+      }
       var uikey = node.getAttribute('uikey');
       if (uikey && ft[uikey] && ft[uikey].name) return ft[uikey];
+      // LayoutItem 锚点：id="wx-<key>" 或 class 含 wx-<key>（避免误吞 wx-<key>_cnt/wx-item-*）
+      var nid = node.id || '';
+      var ncls = (typeof node.className === 'string' ? node.className : '') || '';
+      var mKey = /^wx-([A-Za-z0-9_-]+)$/.exec(nid) || /(?:^|\s)wx-([A-Za-z0-9_-]+)(?:\s|$)/.exec(ncls);
+      if (mKey && ft[mKey[1]] && ft[mKey[1]].name) return ft[mKey[1]];
+      // formItem 语义 class：wx-item-<组件name> → 直接用 name 查 flatTree
+      var mName = /(?:^|\s)wx-item-([A-Za-z0-9_-]+)(?:\s|$)/.exec(ncls);
+      if (mName && ft[mName[1]] && ft[mName[1]].name) return ft[mName[1]];
       node = node.parentElement;
       depth++;
     }
@@ -880,12 +899,40 @@ function isNotificationClose(el) {
     return null;
   }
 
+  // ★ 工作流操作面板检测（与 ydf-browser 0.1.42 _WORKFLOW_PANEL_SCAN_SCRIPT 对齐）：
+  //   销审/审核类工具栏动作打开 #workflow-approve-component 面板，内含
+  //   "撤回审批"等动作按钮与单选式操作项。只认动作区内的点击——
+  //   .approve-btns-container 后代，或面板内的 button/label/[role=button]/[role=radio]，
+  //   背景工具栏/审批历史/评论区的点击不标记。
+  function findWorkflowPanelAction(el) {
+    try {
+      if (!el || !el.closest) return false;
+      var panel = el.closest('#workflow-approve-component');
+      if (!panel) return false;
+      if (el.closest('.approve-btns-container')) return true;
+      var tag = (el.tagName || '').toLowerCase();
+      var role = el.getAttribute('role') || '';
+      return tag === 'button' || tag === 'label' || role === 'button' || role === 'radio';
+    } catch (e) { return false; }
+  }
+
   function extractTarget(el) {
     var popup = findPopupReferenceDialog(el);
     var cellInfo = popup ? extractClickedCellInfo(el, popup) : null;
     var upperTag = (el.tagName || '').toUpperCase();
     // ★ 表头区域内的 input 不作为可编辑表格单元格处理（可能是列头筛选输入框）
     var inHeader = isInTableHeader(el);
+    // ★ 表头点击提取列名（column_header），供 Alt+检查点生成 table.assert_columns
+    var headerColumn = null;
+    if (inHeader) {
+      var thNode = el.closest && el.closest('th, [role="columnheader"], .ant-table-cell, .wui-table-th, td[class*="header"]');
+      var headerText = thNode
+        ? (((thNode.getAttribute('title') || thNode.innerText) || '').trim())
+        : '';
+      if (headerText && headerText.length <= 50) {
+        headerColumn = headerText;
+      }
+    }
     // ★ 即使位于 popup-like 弹窗内，只要是表格内的 input/textarea/select 就应提取可编辑单元格信息。
     //   弹窗可能包含可编辑表格（而非参照选择弹窗），不应因 popup 标志跳过 cell info 提取。
     var editableCell = (!inHeader && (upperTag === 'INPUT' || upperTag === 'TEXTAREA' || upperTag === 'SELECT') && isInTable(el))
@@ -958,7 +1005,7 @@ function isNotificationClose(el) {
       is_popup_reference: !!popup && !editableCell,
       popup_title: popup ? extractPopupTitle(popup) : null,
       cell_text: cellInfo ? cellInfo.cellText : null,
-      column_header: cellInfo ? cellInfo.columnHeader : null,
+      column_header: (cellInfo && cellInfo.columnHeader) || headerColumn || null,
       row_text: cellInfo ? cellInfo.rowText : null,
       is_reference_trigger: isReferenceTrigger(el),
       editable_row_number: editableCell ? editableCell.rowNumber : null,
@@ -979,6 +1026,8 @@ function isNotificationClose(el) {
       is_switch: isSwitchControl(el),
       is_workflow_result: !!wfLayer,
       workflow_result_text: wfLayer ? ((wfLayer.innerText || '').trim().substring(0, 600) || null) : null,
+      // ★ 工作流操作面板动作区（is_workflow_panel 时点击归 workflow_panel.click）
+      is_workflow_panel: findWorkflowPanelAction(el),
       // ★ 通知正文文本（is_notification_close 时提取，用于 notification.assert）
       notification_text: isNotificationClose(el) ? extractNotificationText(el) : null,
       // ★ 组件类型（结构化检测；日期弹层内的单元格点击统一标记为 date_cell）
@@ -1316,6 +1365,11 @@ function isNotificationClose(el) {
     var tag = el.tagName.toLowerCase();
     var fid = el.getAttribute ? (el.getAttribute('fieldid') || el.getAttribute('data-fieldid') || el.getAttribute('uikey') || '') : '';
     var text = (el.textContent || '').trim();
+
+    // ★ 表头单元格放行：Alt+检查点依赖表头点击生成 table.assert_columns
+    try {
+      if (el.closest && el.closest('th, thead, [role="columnheader"]')) return { ok: true };
+    } catch (exHead) {}
 
     // ★ Reject noise fieldids first (table-body, _drag, etc.)
     for (var i = 0; i < NOISE_FIELDID_PATTERNS.length; i++) {

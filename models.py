@@ -63,6 +63,10 @@ class RecordedEventTarget:
     #   workflow_result_text 为该层文本快照（供断言解析 total/succeeded/failed）
     is_workflow_result: bool = False
     workflow_result_text: str | None = None
+    # ★ 元素位于工作流操作面板（#workflow-approve-component，销审/审核类动作
+    #   打开的审批面板）的动作区，点击生成 workflow_panel.click {label}
+    #   （与 ydf-browser 0.1.42 新增组件对齐）
+    is_workflow_panel: bool = False
     # 由 converter 预处理回填（非 JS 注入）：该上传按钮点击后实际选择的文件名
     # （来自后续 file input change 事件的 el.files），用于生成带文件名的占位符
     uploaded_file_name: str | None = None

@@ -110,13 +110,18 @@ The recorder captures all user-interactive DSL operations:
 | `import` | `upload`, `download_template` | Full |
 | `notification` | `close` | Full |
 | `action` | `click` | Full |
+| `workflow_result` | `confirm`, `details`, `assert` | Full — Alt+checkpoint for assert |
+| `workflow_panel` | `click` | Full — workflow approve panel (`#workflow-approve-component`) actions |
 
 **Not captured** (assertions are not user actions; add manually after recording):
 
 - `form.capture_values` / `form.assert_values` — use `--auto-capture` or add manually
-- `table.capture_row_values` / `table.assert_*` — use `--auto-capture` or add manually
-- `notification.assert` — add manually
-- `bpr.start` / `bpr.stop` — recorder _is_ the BPR mechanism
+- `table.capture_row_values` / `table.assert_row_values` / `table.assert_columns` — use `--auto-capture` or Alt+click checkpoints (`table.assert_columns`: Alt+click a column header)
+- `table.assert_column_values` / `table.assert_empty` — add manually
+- `notification.assert` — Alt+click the notification or add manually
+- `bpr.start` / `bpr.stop` — not a page UI component (cookie + API recording switch for `run --performance`); insert manually, start/stop must be paired
+
+Full designer-component → DSL mapping: see `docs/designer-component-map.md`.
 
 ## Output standard
 

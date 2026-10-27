@@ -501,6 +501,17 @@ def _build_table_assert(operation: str, events: list[RecordedEvent]) -> dict[str
     return result
 
 
+def _build_table_assert_columns(operation: str, events: list[RecordedEvent]) -> dict[str, Any]:
+    """构建 table.assert_columns target：{present: [列名]}。
+
+    Alt+点击列头 = 断言该列存在。回放端要求 present/absent 至少一个
+    且为非空字符串列表（与 ydf-browser 0.1.42 schema 对齐）。
+    """
+    event = events[0]
+    col = (event.target.column_header or "").strip()
+    return {"present": [col]} if col else {}
+
+
 def _build_popup_reference(operation: str, events: list[RecordedEvent]) -> dict[str, Any]:
     target = events[0].target
     result: dict[str, Any] = {}
@@ -799,6 +810,17 @@ def _build_workflow_result(operation: str, events: list[RecordedEvent]) -> dict[
     return {"label": label} if label else {}
 
 
+def _build_workflow_panel(operation: str, events: list[RecordedEvent]) -> dict[str, Any]:
+    """构建 workflow_panel.click target：{label: 动作项完整可见文字}。
+
+    与 ydf-browser 对齐：label 必须是面板动作项的完整文字
+    （如"撤回审批"），回放端只接受精确文本匹配。
+    """
+    event = events[0]
+    label = (event.target.text or event.target.label_text or "").strip()
+    return {"label": label} if label else {}
+
+
 _BUILDERS: dict[str, HandlerBuildTarget] = {
     "popup_reference": _build_popup_reference,
     "editable_table": _build_editable_table,
@@ -819,6 +841,7 @@ _BUILDERS: dict[str, HandlerBuildTarget] = {
     "transfer_dialog": _build_transfer_dialog,
     "notification": _build_notification,
     "workflow_result": _build_workflow_result,
+    "workflow_panel": _build_workflow_panel,
 }
 
 
@@ -918,6 +941,22 @@ def _recognize_workflow_result(event: RecordedEvent) -> str | None:
         return "confirm"
     if label in ("查看详情", "详情"):
         return "details"
+    return None
+
+
+def _recognize_workflow_panel(event: RecordedEvent) -> str | None:
+    """识别工作流操作面板（#workflow-approve-component）内的动作点击。
+
+    与 ydf-browser 0.1.42 新增的 workflow_panel 组件对齐：销审/审核类
+    工具栏动作打开的审批操作面板，内含"撤回审批"等动作项。inject.js
+    只在动作区（.approve-btns-container / button / label / role=button|radio）
+    标记 is_workflow_panel，背景工具栏/审批历史不会误入。
+    """
+    if event.type != "click" or not event.target.is_workflow_panel:
+        return None
+    label = (event.target.text or event.target.label_text or "").strip()
+    if label:
+        return "click"
     return None
 
 
@@ -1181,6 +1220,8 @@ HANDLERS: list[ComponentHandler] = [
     # ★ P1-7：工作流批量结果层（flag 检测，最特异）—— 必须在 dialog 之前，
     #   否则结果层的「确认」会被 dialog handler 抢走
     ComponentHandler("workflow_result", _recognize_workflow_result),
+    # ★ 工作流操作面板（flag 检测）—— 面板常渲染在弹窗内，必须在 dialog 之前
+    ComponentHandler("workflow_panel", _recognize_workflow_panel),
     ComponentHandler("tab", _recognize_tab),
     # ★ Switch 必须在 dialog 之前：YDFSwitch 是 button tag，
     #   会被 dialog handler 误识别为弹窗按钮点击
@@ -1219,6 +1260,9 @@ def classify_event(event: RecordedEvent) -> tuple[str, str] | None:
         t = event.target
         if t.is_notification_close or t.notification_text:
             return ("notification", "assert")
+        # ★ 表头检查点 → 列存在性断言（Alt+点击列头 = 断言该列存在）
+        if t.in_table_header and t.column_header:
+            return ("table", "assert_columns")
         if t.in_table and (t.row_data or (t.cell_text and t.column_header)):
             return ("table", "assert_row_values")
         # ★ P1-7：结果层检查点 → 统计断言（回放端要求至少一个统计字段）
@@ -1248,6 +1292,8 @@ def build_target(
         return _build_form_assert(operation, events)
     if component == "table" and operation == "assert_row_values":
         return _build_table_assert(operation, events)
+    if component == "table" and operation == "assert_columns":
+        return _build_table_assert_columns(operation, events)
     # import 有两个 operation，用各自的 builder
     if component == "import" and operation == "download_template":
         return _build_import_download_template(operation, events)
