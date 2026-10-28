@@ -32,7 +32,7 @@ class DslTestSuite:
 
     def to_dict(self) -> dict[str, Any]:
         # 字段顺序与 ydf_browser.DslTestSuite.to_dict (asdict) 保持一致。
-        return {
+        payload: dict[str, Any] = {
             "code": self.code,
             "name": self.name,
             "description": self.description,
@@ -41,8 +41,13 @@ class DslTestSuite:
             "fiscal_year": self.fiscal_year,
             "on_case_failure": self.on_case_failure,
             "runtime_variables": list(self.runtime_variables),
-            "requires_runtime_serial": self.requires_runtime_serial,
         }
+        # requires_runtime_serial 是 ydf-browser 解析器的内部派生字段
+        # （load_dsl_document 会根据 capture 步骤重算并覆盖 YAML 里的值），
+        # 仅在 True 时输出，避免噪音。
+        if self.requires_runtime_serial:
+            payload["requires_runtime_serial"] = True
+        return payload
 
 
 @dataclass

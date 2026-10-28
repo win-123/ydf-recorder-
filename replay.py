@@ -27,6 +27,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -38,6 +39,11 @@ from pathlib import Path
 RECORD_ROOT = Path(__file__).resolve().parent
 RUNTIME_DIR = RECORD_ROOT / ".ydf-browser-runtime"
 RUNTIME_MARKER = "ydf_browser"  # 源码目录内的包名
+
+# 录制器对齐的最低 ydf-browser 版本（0.1.42：workflow_panel/workflow_result 新契约）
+MIN_YDF_BROWSER_VERSION = "0.1.42"
+# install_runtime 成功后写入的版本标记文件名
+_VERSION_MARKER = ".ydf-browser-version"
 
 # ── 数据结构 ────────────────────────────────────────────────
 
@@ -132,6 +138,84 @@ def _bin_command(bin_value: str) -> list[str]:
     if exe.startswith("python"):
         return parts + ["-m", RUNTIME_MARKER + ".cli"]
     return parts
+
+
+def _version_tuple(value: str) -> tuple[int, ...]:
+    """把版本字符串解析为可比较的整数元组（忽略无数字段，如 -beta 后缀）。"""
+    parts: list[int] = []
+    for piece in re.split(r"[.\-_+]", value.strip()):
+        digits = ""
+        for ch in piece:
+            if ch.isdigit():
+                digits += ch
+            elif digits:
+                break
+        if digits:
+            parts.append(int(digits))
+    return tuple(parts) if parts else (0,)
+
+
+def query_runtime_version(root: Path | None = None) -> str | None:
+    """查询内嵌运行时的 ydf-browser 版本。
+
+    优先读 install_runtime 写入的版本标记文件（零开销），
+    否则派生子进程 ``import ydf_browser`` 查询。
+    """
+    base = (root or RECORD_ROOT).resolve() / ".ydf-browser-runtime"
+    marker = base / _VERSION_MARKER
+    if marker.is_file():
+        text = marker.read_text(encoding="utf-8").strip()
+        if text:
+            return text
+    py = runtime_python(root)
+    if py is None:
+        return None
+    try:
+        proc = subprocess.run(
+            [str(py), "-c", "import ydf_browser; print(ydf_browser.__version__)"],
+            capture_output=True, text=True, timeout=60,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if proc.returncode != 0:
+        return None
+    out = (proc.stdout or "").strip()
+    return out.splitlines()[-1].strip() if out else None
+
+
+_version_check_cache: dict[str, str | None] = {}
+
+
+def check_runtime_version(root: Path | None = None) -> str | None:
+    """校验内嵌运行时版本是否满足最低要求。
+
+    返回给用户的警告消息；达标 / 未使用内嵌运行时返回 None。
+    结果按 root 缓存（同一进程内不重复派生子进程）。
+    """
+    key = str((root or RECORD_ROOT).resolve())
+    if key in _version_check_cache:
+        return _version_check_cache[key]
+    base = (root or RECORD_ROOT).resolve() / ".ydf-browser-runtime"
+    marker = base / _VERSION_MARKER
+    if runtime_python(root) is None and not marker.is_file():
+        # 未使用内嵌运行时（PATH / env / interpreter 形态），不校验
+        _version_check_cache[key] = None
+        return None
+    ver = query_runtime_version(root)
+    if ver is None:
+        msg = (
+            "无法确定 ydf-browser 运行时版本（运行时可能过旧或损坏），"
+            "建议重新执行 `ydf-recorder install-ydf-browser`"
+        )
+    elif _version_tuple(ver) < _version_tuple(MIN_YDF_BROWSER_VERSION):
+        msg = (
+            f"ydf-browser 运行时版本 {ver} 低于最低要求 {MIN_YDF_BROWSER_VERSION}，"
+            "DSL 契约可能不匹配，建议重新执行 `ydf-recorder install-ydf-browser`"
+        )
+    else:
+        msg = None
+    _version_check_cache[key] = msg
+    return msg
 
 
 def build_run_args(options: ReplayOptions) -> list[str]:
@@ -259,6 +343,17 @@ def install_runtime(source_dir: Path | None = None, with_browsers: bool = False)
         if proc.returncode != 0:
             print(f"[ydf-recorder] error: 步骤失败（exit={proc.returncode}）: {' '.join(argv)}", file=sys.stderr)
             return proc.returncode
+    # 写入版本标记，供 replay/validate 前的快速版本校验使用（避免每次派生子进程）
+    try:
+        vproc = subprocess.run(
+            [str(_venv_python_for(target)), "-c", "import ydf_browser; print(ydf_browser.__version__)"],
+            capture_output=True, text=True, timeout=120,
+        )
+        if vproc.returncode == 0 and vproc.stdout.strip():
+            ver = vproc.stdout.strip().splitlines()[-1].strip()
+            (target / _VERSION_MARKER).write_text(ver + "\n", encoding="utf-8")
+    except (OSError, subprocess.SubprocessError):
+        pass  # 标记写失败不影响运行时就绪；版本校验会退化为子进程查询
     print(f"[ydf-recorder] install-ydf-browser: 运行时就绪 → {target}", file=sys.stderr)
     return 0
 
@@ -339,6 +434,9 @@ def handle_replay(args) -> int:
     if not Path(yaml_path).is_file():
         print(f"[ydf-recorder] error: YAML 文件不存在: {yaml_path}", file=sys.stderr)
         return 1
+    version_warn = check_runtime_version()
+    if version_warn:
+        print(f"[ydf-recorder] warn: {version_warn}", file=sys.stderr)
     code, summary = run_replay(_options_from_args(args, yaml_path), summary_only=args.summary_only)
     if summary is None:
         print("[ydf-recorder] replay: 未解析到结果摘要（可能中途失败，见上方输出）", file=sys.stderr)
@@ -365,6 +463,9 @@ def handle_validate(args) -> int:
     if not Path(yaml_path).is_file():
         print(f"[ydf-recorder] error: YAML 文件不存在: {yaml_path}", file=sys.stderr)
         return 1
+    version_warn = check_runtime_version()
+    if version_warn:
+        print(f"[ydf-recorder] warn: {version_warn}", file=sys.stderr)
     code, summary = run_validate(_options_from_args(args, yaml_path), summary_only=args.summary_only)
     if summary is not None and summary.get("success"):
         totals = summary.get("totals") or {}

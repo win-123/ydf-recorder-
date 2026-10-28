@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import re
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -24,7 +25,7 @@ from .dsl_models import DslDocument, DslTestCase, DslTestSuite
 from .models import RecordedEvent, RecordedEventTarget, RecordingSession
 # classify_event / build_target / can_coalesce 的实现来自 registry；
 # 此处 re-export 以保持 ``from .converter import classify_event`` 等公开 API。
-from .registry import build_target, can_coalesce, classify_event
+from .registry import _parse_workflow_counts, build_target, can_coalesce, classify_event
 
 __all__ = [
     "abstract_values",
@@ -261,6 +262,11 @@ def convert_events_to_steps(
     groups = coalesce_events(merged, classifications)
 
     steps: list[dict[str, Any]] = []
+    # ★ 0.1.42 契约：workflow_result.confirm/details 前必须有 workflow_result.assert，
+    #   且 assert 必须紧跟触发点击（回放端 _unhandled_workflow_result_error 检查）。
+    #   用户只点了「确认」没按 Alt+点击打断言时，这里从 confirm 事件自带的结果层
+    #   文本解析真实统计数字，自动补一条 assert（编造数字会导致回放断言失败）。
+    wf_asserted = False
     for (component, operation), group_events in groups:
         target = build_target(component, operation, group_events)
         if abstract:
@@ -268,6 +274,31 @@ def convert_events_to_steps(
         step: dict[str, Any] = {"component": component, "operation": operation}
         if target:
             step["target"] = target
+        if component == "workflow_result":
+            if operation == "assert":
+                wf_asserted = True
+            elif operation in ("confirm", "details") and not wf_asserted:
+                first = group_events[0]
+                counts = _parse_workflow_counts(
+                    first.target.workflow_result_text or first.target.text or ""
+                )
+                if counts:
+                    steps.append({
+                        "component": "workflow_result",
+                        "operation": "assert",
+                        "target": dict(counts),
+                    })
+                    wf_asserted = True
+                else:
+                    print(
+                        "[ydf-recorder] warn: 录制到 workflow_result.confirm，"
+                        "但结果层统计不可解析且无显式断言——回放时该步骤会报 "
+                        "WorkflowResultError。建议重录并在结果层出现时按 Alt+点击补断言，"
+                        "或手工为该步骤补 workflow_result.assert。",
+                        file=sys.stderr,
+                    )
+        elif component != "workflow_result":
+            wf_asserted = False
         # ★ 问题1修复：form.fill 步骤携带表单上下文，
         #   供 _merge_form_fills 做跨间隔的上下文感知合并（键会在合并后剥离）
         if component == "form" and operation == "fill":
