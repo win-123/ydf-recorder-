@@ -38,10 +38,13 @@ python3 -m venv "$BUILD_VENV"
 "$BUILD_VENV/bin/pip" install pyinstaller -q
 "$BUILD_VENV/bin/pip" install "$ROOT" -q
 # 回放器：--no-deps 安装 vendor/ydf-browser（playwright 版本随主环境，
-# 与内嵌 Chromium 对齐；避免运行时 venv 里再背一份浏览器）
+# 与内嵌 Chromium 对齐；避免运行时 venv 里再背一份浏览器）。
+# 但它的纯 Python 依赖（openpyxl 导出性能报表、PyYAML、requests）必须显式安装，
+# 否则打包出的 ydfbrowser-cli 一启动就 ModuleNotFoundError。
 if [[ -d "$ROOT/vendor/ydf-browser" ]]; then
   "$BUILD_VENV/bin/pip" install --no-deps "$ROOT/vendor/ydf-browser" -q
-  echo "    已安装 vendor/ydf-browser（回放器）"
+  "$BUILD_VENV/bin/pip" install openpyxl PyYAML requests -q
+  echo "    已安装 vendor/ydf-browser（回放器）+ 依赖 openpyxl/PyYAML/requests"
 fi
 
 echo "==> [2/8] PyInstaller 打包（onedir，含 playwright node driver）"

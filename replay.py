@@ -84,13 +84,31 @@ class ReplayOptions:
 def _frozen_resources_dir() -> Path | None:
     """打包态（PyInstaller）下应用 Resources 目录；非打包返回 None。
 
-    macOS .app: <exe 位于 Contents/Resources/app/YonDiFRecorder/> → Resources
-    Windows:    <exe 位于 app/YonDiFRecorder/> → 逐级向上找 Resources / exe 同级
+    布局差异（从可执行文件向上查找，命中含内置资源的目录）：
+      macOS .app: <App>/Contents/Resources/app/YonDiFRecorder/<exe>
+                  → Resources 目录里有 chromium/ 与 ydfbrowser-cli/
+      Windows   : <dist>/app/YonDiFRecorder/<exe> 或 <dist>/<exe>
+                  → 资源就在 exe 同级
+    因此按「向上逐级找含 chromium/ 或 ydfbrowser-cli/ 的目录」判定，避免
+    写死层级算错（曾把 app/YonDiFRecorder 误当 Resources，导致回放器找不到）。
     """
     if not getattr(sys, "frozen", False):
         return None
     exe = Path(sys.executable).resolve()
-    for cand in (exe.parent.parent / "Resources", exe.parent / "Resources", exe.parent):
+    cur = exe.parent
+    for _ in range(6):
+        if (cur / "ydfbrowser-cli").is_dir() or (cur / "chromium").is_dir():
+            return cur
+        if cur.parent == cur:
+            break
+        cur = cur.parent
+    # 回退：按已知布局猜测
+    for cand in (
+        exe.parent.parent.parent,           # macOS .app: Contents/Resources
+        exe.parent.parent / "Resources",
+        exe.parent / "Resources",
+        exe.parent,
+    ):
         if cand.is_dir():
             return cand
     return exe.parent
@@ -437,6 +455,20 @@ def run_validate(options: ReplayOptions, summary_only: bool = False) -> tuple[in
     return proc.returncode, summary
 
 
+def _replay_workdir() -> Path:
+    """回放子进程的工作目录（ydf-browser 会在 ./reports/ 下写报告）。
+
+    桌面应用从 Finder 启动时 cwd 可能是 ``/`` 或只读目录，导致报告写失败。
+    统一落到 ``~/.ydf-recorder/replay/``，保证可写且集中。
+    """
+    base = Path.home() / ".ydf-recorder" / "replay"
+    try:
+        base.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        return Path.home()
+    return base
+
+
 def run_replay(options: ReplayOptions, summary_only: bool = False) -> tuple[int, dict | None]:
     """执行 ``ydf-browser run`` 真实回放。流式透传 stdout，末尾解析 JSON 摘要。
 
@@ -451,7 +483,14 @@ def run_replay(options: ReplayOptions, summary_only: bool = False) -> tuple[int,
     print(f"[ydf-recorder] replay: {' '.join(argv)}", file=sys.stderr, flush=True)
 
     collected: list[str] = []
-    proc = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=None, text=True, bufsize=1)
+    proc = subprocess.Popen(
+        argv,
+        stdout=subprocess.PIPE,
+        stderr=None,
+        text=True,
+        bufsize=1,
+        cwd=str(_replay_workdir()),
+    )
     assert proc.stdout is not None
     for line in proc.stdout:
         collected.append(line)
@@ -501,11 +540,54 @@ def _options_from_args(args, yaml_path: str) -> ReplayOptions:
     )
 
 
+def _clear_stale_profile_lock() -> None:
+    """清理 ydf-browser 持久化 profile 的残留 Singleton 锁。
+
+    回放中途崩溃/被强杀后，``~/.ydf-browser/browser-profile/default/`` 里会
+    留下 SingletonLock 等符号链接，导致下次启动 Chromium 直接失败
+    （Failed to create a ProcessSingleton）。这里只在锁指向的进程已不存在时
+    清理，避免误删正在运行的浏览器的锁。
+    """
+    import errno
+
+    profile = Path.home() / ".ydf-browser" / "browser-profile" / "default"
+    lock = profile / "SingletonLock"
+    if not lock.is_symlink() and not lock.exists():
+        return
+    alive = False
+    try:
+        target = os.readlink(lock)  # 形如 "hostname-12345"
+        pid_text = target.rsplit("-", 1)[-1]
+        pid = int(pid_text)
+        os.kill(pid, 0)
+        alive = True
+    except (OSError, ValueError, AttributeError) as exc:
+        if isinstance(exc, OSError) and exc.errno == errno.EPERM:
+            alive = True  # 进程存在但无权限探测 → 视为运行中
+    if alive:
+        return
+    removed = []
+    for name in ("SingletonLock", "SingletonCookie", "SingletonSocket"):
+        p = profile / name
+        try:
+            if p.is_symlink() or p.exists():
+                p.unlink()
+                removed.append(name)
+        except OSError:
+            pass
+    if removed:
+        print(
+            f"[ydf-recorder] 已清理残留浏览器锁: {'/'.join(removed)}",
+            file=sys.stderr,
+        )
+
+
 def handle_replay(args) -> int:
     yaml_path = args.yaml
     if not Path(yaml_path).is_file():
         print(f"[ydf-recorder] error: YAML 文件不存在: {yaml_path}", file=sys.stderr)
         return 1
+    _clear_stale_profile_lock()
     version_warn = check_runtime_version()
     if version_warn:
         print(f"[ydf-recorder] warn: {version_warn}", file=sys.stderr)
