@@ -390,6 +390,48 @@ class RecorderRuntime:
                 login_ok = self._try_reuse_session()
                 if login_ok:
                     print("[ydf-recorder] 持久化 session 有效，跳过 CAS 登录", flush=True)
+                    # 浏览器会话虽有效，但拉菜单树用的 requests 会话还没建。
+                    # 用 requests 静默登录一次补齐 _api_session（不影响浏览器）；
+                    # 失败则回退到完整 CAS 登录。
+                    if self._auto_login:
+                        try:
+                            from .auth import apply_context, cookies_for_playwright, login as _api_login
+                            result = _api_login(self.config)
+                            try:
+                                result = apply_context(
+                                    self.config,
+                                    result,
+                                    tenant_name=self.config.tenant,
+                                    default_org=self.config.default_org,
+                                    fiscal_year=self.config.fiscal_year,
+                                )
+                            except Exception as exc:
+                                print(
+                                    f"[ydf-recorder] ⚠️ 上下文切换失败: {exc}",
+                                    flush=True,
+                                )
+                            self._api_session = result.session
+                            # 用最新登录态刷新浏览器 cookies，保证租户上下文一致
+                            try:
+                                fresh = cookies_for_playwright(
+                                    self.config, result.session
+                                )
+                                if fresh:
+                                    self._context.clear_cookies()
+                                    self._context.add_cookies(fresh)
+                            except Exception:
+                                pass
+                            print(
+                                "[ydf-recorder] 已建立菜单树会话（requests 登录）",
+                                flush=True,
+                            )
+                        except Exception as exc:
+                            print(
+                                f"[ydf-recorder] ⚠️ requests 登录失败: {exc}，"
+                                "回退完整 CAS 登录",
+                                flush=True,
+                            )
+                            login_ok = False
             if not login_ok:
                 try:
                     self._do_login()
