@@ -1,0 +1,63 @@
+suite:
+  code: unit_budget_review_checkbox_assert
+  name: 单位预算批复 checkbox 状态断言
+  description: 验证详情页两个页签中的同名 YDFCheckbox 字段可用 form.assert_values 断言 on/off 状态
+  tenant: 财政一体化
+  default_org: 南昌市局本级
+  on_case_failure: stop_suite
+
+cases:
+  - code: assert-hide-zero-line-checked
+    name: 校验隐藏0金额行默认勾选
+    user: 默认用户
+    steps:
+      - action: open_menu
+        menu_path: 单位预算批复
+
+      - component: query
+        operation: search
+        target:
+          conditions: []
+
+      - component: table_row_selection
+        operation: select
+        target:
+          first_available: true
+
+      - component: table_row_action
+        operation: click
+        target:
+          action: 详情
+          first_available: true
+
+      - component: tab
+        operation: click
+        target:
+          label: 支出计划信息
+
+      - component: form
+        operation: assert_values
+        target:
+          fields:
+            隐藏0金额行: "on"
+
+      - component: tab
+        operation: click
+        target:
+          label: 项目预算信息
+
+      - component: form
+        operation: assert_values
+        target:
+          fields:
+            隐藏0金额行: "on"
+
+      - component: dialog
+        operation: click
+        target:
+          label: 取消
+
+      - component: dialog
+        operation: confirm
+        target:
+          label: 确定

@@ -97,7 +97,7 @@ setup_wizard() {
   local base tenant org user pass fy
   base=$(ask "① 环境地址（如 http://10.16.183.221）" "$(grep -oE 'base_url:[[:space:]]*"?http[^"[:space:]]*' "$CFG" 2>/dev/null | head -1 | sed -E 's/.*http/http/')") || return 1
   [ -n "$base" ] || { alert "环境地址不能为空"; return 1; }
-  tenant=$(ask "② 租户编码（登录后地址栏 / 平台信息里可见，如 ppksggwz）" "") || return 1
+  tenant=$(ask "② 租户（名称或编码均可，如 财政一体化 或 ppksggwz）" "") || return 1
   [ -n "$tenant" ] || { alert "租户编码不能为空"; return 1; }
   org=$(ask "③ 默认组织编码（组织切换里可见，如 2661013488172269586）" "") || return 1
   [ -n "$org" ] || { alert "默认组织编码不能为空"; return 1; }
@@ -122,10 +122,42 @@ if ! cfg_ready; then
 fi
 export YDF_RECORDER_CONFIG="$CFG"
 
+# ── 选择动作：录制 / 回放 ─────────────────────────────────────
+action=$(osascript -e 'on run argv' \
+  -e 'set r to display dialog "请选择要执行的操作" with title "YonDiF Recorder" buttons {"回放 YAML", "录制"} default button "录制"' \
+  -e 'return button returned of r' \
+  -e 'end run' 2>/dev/null)
+[ -n "$action" ] || exit 0
+
+if [ "$action" = "回放 YAML" ]; then
+  # ── 回放模式：选择 YAML 文件 → 内嵌 ydf-browser 运行时回放 ──
+  yaml_path=$(osascript -e 'on run argv' \
+    -e 'set f to choose file with prompt "选择要回放的 DSL YAML 文件" of type {"public.yaml", "public.plain-text", "text"}' \
+    -e 'return POSIX path of f' \
+    -e 'end run' 2>/dev/null)
+  if [ -z "$yaml_path" ]; then
+    yaml_path=$(ask "输入要回放的 YAML 文件路径" "") || exit 0
+    [ -n "$yaml_path" ] || exit 0
+  fi
+  [ -f "$yaml_path" ] || { alert "文件不存在：$yaml_path"; exit 1; }
+  log "启动回放 → $yaml_path"
+  echo "---- 回放开始 ----" >>"$LOG"
+  "$BIN" replay "$yaml_path" --env ydf >>"$LOG" 2>&1
+  rc=$?
+  printf -- '---- 回放结束（退出码 %s）----\n' "$rc" >>"$LOG"
+  if [ "$rc" -eq 0 ]; then
+    notify "$yaml_path" "回放完成"
+  else
+    alert "回放未成功（退出码 ${rc}）。\n\n日志：$LOG\n\n常见原因：YAML 用例与页面不匹配、环境不可达、登录态失效。"
+    open -a Console "$LOG" 2>/dev/null || true
+  fi
+  exit "$rc"
+fi
+
 # ── 每次启动：询问要自动打开的菜单（可留空） ──────────────────
 last_menu=""
 [ -f "$MENU_CACHE" ] && last_menu="$(cat "$MENU_CACHE")"
-menu_path=$(ask "要自动打开的菜单路径（用 >> 分隔，如 项目管理>>项目库>>项目建议）\n\n留空则登录后手动点开菜单。" "$last_menu") || exit 0
+menu_path=$(ask "要自动打开的菜单路径（用 >> 分隔，可只写末级菜单名，\n如 项目库>>一级项目 或 一级项目；须是当前环境菜单树里存在的菜单）\n\n留空则登录后手动点开菜单。" "$last_menu") || exit 0
 if [ -n "$menu_path" ]; then
   printf '%s' "$menu_path" >"$MENU_CACHE"
 fi

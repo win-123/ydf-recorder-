@@ -1,0 +1,41 @@
+suite:
+  code: bpr_enterprise_info_recording
+  name: 企业信息库 BPR 局部录制示例
+  description: 打开企业信息库，选中一条企业数据，录制修改并取消这一段业务操作
+  tenant: YonDiF-2609产品开发
+  default_org: global00
+
+cases:
+  - code: edit-cancel-bpr
+    name: 修改并取消的 BPR 录制
+    user: 默认用户
+    steps:
+      - action: open_menu
+        menu_path: 全局基础信息>>基础信息>>企业信息库
+
+      - component: table_row_selection
+        operation: select
+        target:
+          match:
+            column: 企业编码
+            equals: "001003002014"
+
+      - component: bpr
+        operation: start
+        target:
+          name: 企业信息库修改取消
+          description: 录制从点击修改到取消关闭编辑页这一段操作
+
+      - component: toolbar
+        operation: click
+        target:
+          label: 修改
+
+      - component: toolbar
+        operation: click
+        target:
+          label: 取消
+
+      - component: bpr
+        operation: stop
+        target: {}

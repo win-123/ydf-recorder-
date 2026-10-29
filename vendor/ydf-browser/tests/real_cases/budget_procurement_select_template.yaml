@@ -1,0 +1,141 @@
+# Bug 现象：点击“新增”进入“新增政府采购”后，选第 1 行却命中背景空表，报“当前可见有效行数=0”。
+# 原因：该动态模板的表格列使用 formItem，工作面就绪判断将列误当作普通表单字段，未应用新模板。
+# 修复：复用 parser 的 table_columns 分类，字段身份和标签均排除表格列，保留普通表单字段兼容行为。
+# 边界：工作面必须唯一且可交互；真实表单未就绪或存在歧义时仍失败，不按标签任选背景控件。
+# 前置数据：2026 年默认组织 255001 的“一级采购项目”下可查询“二级采购项目”，首行可进入细化；
+# 沿用原用例的表单、支出计划和经济分类联动前置，再临时填写采购明细；固定数据或候选缺失时不自动替换。
+# 预期：新增后选行使用当前前景模板，随后列断言和采购品目、部门经济分类、计量单位回读通过。
+# 数据影响：临时录入原用例的表单和预算、采购明细，勾选及读取采购选择层；不确认、不保存、不提交、不审核。
+# run: ./.venv/bin/python -m ydf_browser.cli run --dsl tests/real_cases/budget_procurement_select_template.yaml --env t53 --headless
+
+suite:
+  code: budget-procurement-select-template
+  name: 二上二级项目细化-采购选择动态模板回归
+#  tenant: 单位内控
+  tenant: wq测试1
+  default_org: "255001"
+  fiscal_year: "2026"
+cases:
+  - code: select-procurement-detail
+    name: 新增采购选择层正确应用表格模板
+    user: 15778907890
+    tags: [regression]
+    steps:
+      - action: open_menu
+        menu_path: 预算编制>>部门预算编制>>二上预算编制>>二上二级项目细化
+      - component: tree
+        operation: select
+        target:
+          name: 项目类别
+#          label: 一级采购项目
+          label: 998测试
+      - component: query
+        operation: search
+        target:
+          conditions:
+            - field: 项目名称
+#              equals: 二级采购项目
+              equals: 998测试
+      - component: table_row_selection
+        operation: select
+        target:
+          row_numbers: [1]
+      - component: toolbar
+        operation: click
+        target:
+          label: 细化
+      - component: form
+        operation: fill
+        target:
+          fields:
+            是否包含政府采购: 是
+      - component: tab
+        operation: click
+        target:
+          label: 支出计划信息
+      - component: editable_table
+        operation: fill_row
+        target:
+          table: 分年支出计划
+          row_number: 1
+          fields:
+            财政拨款(万元): "700.00"
+      - component: editable_table
+        operation: fill_row
+        target:
+          table: 项目测算信息
+          row_number: 2
+          fields:
+            部门经济分类: 30902 办公设备购置
+      - component: tab
+        operation: click
+        target:
+          label: 经济分类细化
+      - component: editable_table
+        operation: fill_row
+        target:
+          table: 经济分类细化
+          row_number: 1
+          fields:
+            政府支出经济分类科目: 50404 设备购置
+            是否政府采购: 1 是
+            财政拨款(万元): "700.00"
+      - component: tab
+        operation: click
+        target:
+          label: 政府采购信息
+
+      - component: editable_table
+        operation: add_row
+        target:
+          table: 政府采购信息
+          label: 新增
+
+
+      - component: editable_table
+        operation: fill_row
+        target:
+          table: 政府采购信息
+          row_number: 1
+          fields:
+            部门经济分类: 30902 办公设备购置
+            政府采购品目: A02010105 台式计算机
+            计量单位: 台
+            数量: 1000
+            单价: "7000"
+            财政拨款(万元): "700.00"
+      - component: toolbar
+        operation: click
+        target:
+          label: 生成政府采购项目
+      - component: form
+        operation: fill
+        target:
+          fields:
+            政府采购项目名称: 采购预算项目
+            采购类型: A 货物
+            是否专门面向中小企业采购: 否
+            是否专门面向小型、微型企业采购: 否
+      - component: toolbar
+        operation: click
+        target:
+          label: 新增
+      - component: table_row_selection
+        operation: select
+        target:
+          row_number: 1
+      - component: table
+        operation: assert_columns
+        target:
+          table: 政府采购表格
+          present: [任务明细, 部门经济分类, 政府采购品目, 计量单位]
+      - component: table
+        operation: assert_row_values
+        target:
+          table: 政府采购表格
+          match:
+            column: 政府采购品目
+            equals: A02010105 台式计算机
+          fields:
+            部门经济分类: 30902 办公设备购置
+            计量单位: 台

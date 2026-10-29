@@ -1,0 +1,24 @@
+suite:
+  code: editable_table_column_group
+  name: 可编辑表格多表头同名列示例
+  tenant: 财政一体化
+  default_org: "049002"
+
+cases:
+  - code: fill-grouped-column
+    name: 同一步骤混填普通列和父表头限定列
+    user: 默认用户
+    steps:
+      - action: open_menu
+        menu_path: 预算绩效>>决算结果同步>>决算结果同步
+
+      - component: editable_table
+        operation: fill_row
+        target:
+          table: 三级项目同步
+          row_number: 1
+          fields:
+            备注: 自动化备注
+            当年财政拨款(万元):
+              column_group: 全年执行决算金额
+              value: "3"

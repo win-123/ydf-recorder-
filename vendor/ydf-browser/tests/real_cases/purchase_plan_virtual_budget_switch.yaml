@@ -1,0 +1,49 @@
+# 真实回归环境基线（2026-08-20；仅作运行前核对，不参与 DSL 解析）
+# base_url: https://tv5-ydf.yonyougov.top
+# env_name: ydf
+# tenant: 财政一体化
+# user_alias: 15747894789
+# default_org: "101001"
+# menu_path: 采购管理>>采购计划>>采购计划编制
+# expected: “使用虚拟预算”录入成功，随后读取值为“是”，且读取使用 verified 契约、不走 fallback。
+# data_impact: 用例不保存、不提交，不产生业务单据。
+#
+# Bug 现象: 新增采购计划后填写“使用虚拟预算”时报“表单字段[使用虚拟预算]的平台精确身份状态不兼容”。
+# 原因: YDFSwitch 的运行时 DOM 在同一 identity_root 下同时暴露多个 div/label wrapper 和一个无 role 的原生
+# button；绑定器只把 input/textarea/select 或带控件 role 的元素视为直接控件，无法从多个精确身份元素中收敛
+# 到真实开关。动态模板在 form.fill 前生效后不再由旧的标签兜底掩盖该缺口，因此原来可用的用例开始失败。
+# 解决: 仅为 YDFSwitch 把原生 button 识别为直接控件；同一逻辑根只有一个合格 button 时收敛绑定，存在
+# 多个 button 时仍保持失败关闭。用例在录入后追加 form.assert_values，验证页面实际值为“是”。
+# run: ./.venv/bin/python -m ydf_browser.cli run --dsl tests/real_cases/purchase_plan_virtual_budget_switch.yaml --headless
+
+suite:
+  code: real-regression-purchase-plan-virtual-budget-switch
+  name: 采购计划-使用虚拟预算开关真实回归
+  description: 验证 YDFSwitch 同根 wrapper 与唯一原生按钮的精确身份收敛
+  tenant: 财政一体化
+  default_org: "101001"
+cases:
+  - code: purchase-plan-virtual-budget-switch
+    name: 新增采购计划并填写使用虚拟预算
+    user: 15747894789
+    steps:
+      - action: open_menu
+        menu_path: 采购管理>>采购计划>>采购计划编制
+
+      - component: toolbar
+        operation: click
+        target:
+          label: 新增
+          sub_label: 采购计划
+
+      - component: form
+        operation: fill
+        target:
+          fields:
+            使用虚拟预算: 是
+
+      - component: form
+        operation: assert_values
+        target:
+          fields:
+            使用虚拟预算: 是

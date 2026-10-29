@@ -1,0 +1,32 @@
+suite:
+  code: performance_template_table_columns
+  name: 【模板库】-新增页三级模板明细列断言
+  description: 验证新增页面三级模板明细表中不存在一级绩效指标分值和二级绩效指标分值列
+  tenant: 财政一体化
+cases:
+  - code: assert-performance-score-columns-absent
+    name: 新增页校验三级模板明细表头
+    description: 模板库新增页断言字段列不存在
+    user: 人员21
+    default_org: "南昌市局本级"
+    steps:
+      - action: open_menu
+        menu_path: 预算绩效>>绩效模板>>模板库
+
+      - component: toolbar
+        operation: click
+        target:
+          label: 新增
+
+      - component: table
+        operation: assert_columns
+        target:
+          table: 三级模板明细
+          present:
+            - 一级绩效指标
+            - 二级绩效指标
+            - 三级绩效指标
+            - 三级绩效指标分值
+          absent:
+            - 一级绩效指标分值
+            - 二级绩效指标分值

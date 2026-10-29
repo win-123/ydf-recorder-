@@ -1,0 +1,45 @@
+suite:
+  code: loan_bill_payee_account_popup_tabs
+  name: 借款单填报收款方账户多页签参照
+  description: 新增个人借款单，在汇款转账明细中通过本单位人员账户页签选择收款方户名
+  tenant: 单位内控
+
+cases:
+  - code: create-loan-bill-payee-tab-reference
+    name: 收款方户名选择本单位人员账户
+    description: 验证可编辑表格 YDFReferSelect 支持参照内部页签、通用搜索框和表格行匹配
+    user: 用户0164
+    default_org: 南昌市局本级
+    steps:
+      - action: open_menu
+        menu_path: 报销管理>>借款办理>>借款单填报
+
+      - component: toolbar
+        operation: click
+        target:
+          label: 新增
+          sub_label: 个人借款单
+
+      - component: form
+        operation: fill
+        target:
+          fields:
+            借款金额: "100"
+            借款事由: 【自动化】【ydf-browser】借款填报收款方账户多页签参照{{random.suffix}}
+
+      - component: editable_table
+        operation: add_row
+        target:
+          label: 汇款转账
+
+      - component: editable_table
+        operation: fill_row
+        target:
+          row_number: -1
+          fields:
+            收款方户名:
+              tab: 本单位人员账户
+              filter: 苏康涯
+              match:
+                column: 户名
+                equals: 苏康涯

@@ -1,0 +1,45 @@
+# 只读验证 A → B → A，各账号沿用已有真实用例中的菜单权限。
+suite:
+  code: real-session-account-switch
+  name: 不同账号隔离与返回原账号
+  description: 只读验证连续用例及跨命令认证复用
+  tenant: 财政一体化
+  default_org: '101001'
+cases:
+- code: session-first
+  name: 首次读取合同审核列表
+  user: 15747894789
+  tags:
+  - regression
+  - performance
+  steps:
+  - action: open_menu
+    menu_path: 合同管理>>合同审核>>合同审核
+  - component: table
+    operation: assert_columns
+    target:
+      present:
+      - 合同编号
+      - 合同名称
+- code: session-account-b
+  name: 第二账号读取申请单列表
+  user: 13916730164
+  default_org: 江西省局本级（主管单位/单位经办）
+  steps:
+  - action: open_menu
+    menu_path: 事前申请>>申请办理>>申请单填报
+- code: session-next
+  name: 同账号再次读取合同审核列表
+  user: 15747894789
+  tags:
+  - regression
+  - performance
+  steps:
+  - action: open_menu
+    menu_path: 合同管理>>合同审核>>合同审核
+  - component: table
+    operation: assert_columns
+    target:
+      present:
+      - 合同编号
+      - 合同名称

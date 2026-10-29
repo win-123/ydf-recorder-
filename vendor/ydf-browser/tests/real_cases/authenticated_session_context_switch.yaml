@@ -1,0 +1,41 @@
+# 回归：身份探测有效但刷新凭据过期时，首次准备应恢复目标上下文；不得等第二次运行。
+# 只读列表验证；切换默认组织并恢复，业务年度显式设为 2027。
+suite:
+  code: real-session-context-reuse
+  name: 同账号切换组织会话复用
+  description: 只读验证连续用例及跨命令认证复用
+  tenant: 财政一体化
+  default_org: '101001'
+  fiscal_year: '2027'
+cases:
+- code: other-org
+  name: 切换默认组织后读取列表
+  user: 15747894789
+  tags:
+  - regression
+  - performance
+  steps:
+  - action: open_menu
+    menu_path: 合同管理>>合同审核>>合同审核
+  - component: table
+    operation: assert_columns
+    target:
+      present:
+      - 合同编号
+      - 合同名称
+  default_org: global00
+- code: restore-org
+  name: 恢复默认组织后读取列表
+  user: 15747894789
+  tags:
+  - regression
+  - performance
+  steps:
+  - action: open_menu
+    menu_path: 合同管理>>合同审核>>合同审核
+  - component: table
+    operation: assert_columns
+    target:
+      present:
+      - 合同编号
+      - 合同名称

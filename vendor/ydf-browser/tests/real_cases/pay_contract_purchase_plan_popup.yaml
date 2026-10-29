@@ -1,0 +1,94 @@
+# 真实回归环境基线（2026-08-19；仅作运行前核对，不参与 DSL 解析）
+# base_url: https://tv5-ydf.yonyougov.top
+# env_name: ydf
+# tenant: 财政一体化
+# user_alias: 15747894789
+# default_org: "101001"
+# menu_path: 合同管理>>付款合同>>付款合同登记
+# expected: 新增政府采购合同后，“采购计划”和“采购供应商”参照均能打开、选择并回填。
+# data_impact: 用例不保存、不提交，不产生业务单据。
+# known_environment_blocker: 当前环境的 basFundCounterpartAccount QuerySchema 查询
+# `source_enterprise_child_id` 失败时，“采购供应商”会正确打开但无可选数据；需先修复后端实体/表结构。
+# 当前回归（2026-08-20）: “采购计划”偶发未选中第一行，页面提示“请选择数据！”，最终报告
+# “弹出参照选择框未关闭”；紧接着重跑又能成功回填。
+# 根因: 表格业务行异步渲染前，`first_available` 曾把分页 active `li` 当成候选；排除分页后又发现
+# “暂时没有数据”只是加载占位。最终失败报告进一步证明：接口已返回 50 行且当前 DOM 已有业务行，
+# 运行时却仍持有加载阶段解析出的旧选择区域；区域被替换时，Locator 求值异常又被误判为“已就绪”，
+# 因而跳过重新解析，只能继续看到旧区域的“共0条”。
+# 最终修复: `first_available` 排除分页/footer，只接受有效业务候选和真实 radio/checkbox 选择态；
+# 点击前以稳定的参照弹窗外壳为锚等待有效候选并重新解析当前选择区域；失效 Locator 按未就绪处理，
+# 候选扫描或选择态校验失败时，继续在同一个既有 deadline 内重取当前区域并重试，不叠加新等待、
+# 不再沿用旧区域。
+# fail_closed: 页面没有提供可证明空状态稳定的终态信号，因此真正无数据或 loading 持续时最多等待
+# 既有 deadline，然后保留诊断并失败，不确认、不无限等待。
+#
+# 历史错误: “采购计划”绑定到 `<base>_input` DIV 后，运行时把该内层 wrapper 当作最终字段 owner，
+# 只点击搜索容器而遗漏同字段兄弟按钮 `<base>_btn`，最终报告“未打开弹出参照选择框”。
+# 解决方法:
+# 1. 共享参照 owner 恢复逻辑不再只允许 input/textarea/select 提供 fieldid；
+# 当当前 owner 就是带 fieldid 的内层 wrapper 时，仅在近邻容器中查找同一 fieldid 族的可见触发器，
+# 因此 `jbxx_form_purPlanId_input` 会恢复到 `jbxx_form_purPlanId_btn`，且不会误点邻近字段的按钮。
+# 2. `first_available` 的表格候选只在 radio/checkbox 真实选中后才成功，不能把行高亮当成选择完成。
+# 3. “采购供应商”的 `button.ydf-select-btn` 按同字段身份识别为真实触发器；外层
+# `div.yy-ydf-modal` 只含标题和 iframe 时，将可见 iframe 视为选择面，再在子 frame 内查询和匹配。
+# 4. 对没有稳定行选择器、只能按同一横坐标单元格派生出的表格候选，先回到单元格所属整行查找
+# radio/checkbox；不能直接点击“序号”文本后依赖补点，否则异步渲染时会出现未选择数据却点击确认。
+# 5. 候选写入临时定位 marker 前按真实 DOM 目标去重，避免同一 radio 的后一个 marker 覆盖前一个；
+# 否则每个已失效定位器会依次消耗滚动、普通点击和强制点击超时，造成数据显示后约 5～10 秒停顿。
+# run: ./.venv/bin/python -m ydf_browser.cli run --dsl tests/real_cases/pay_contract_purchase_plan_popup.yaml --headless --case pay-contract-purchase-plan-first-available
+
+suite:
+  code: real-regression-pay-contract-purchase-plan-popup
+  name: 付款合同登记-采购参照真实回归
+  description: 验证采购计划与采购供应商的同字段触发器、选择态和 iframe 参照识别
+  tenant: 财政一体化
+  default_org: "101001"
+  fiscal_year: '2026'
+cases:
+  - code: pay-contract-purchase-plan-first-available
+    name: 新增政府采购合同并选择首个采购计划
+    user: 15747894789
+    steps:
+      - action: open_menu
+        menu_path: 合同管理>>付款合同>>付款合同登记
+
+      - component: toolbar
+        operation: click
+        target:
+          label: 新增
+          sub_label: 政府采购合同
+
+      - component: form
+        operation: fill
+        target:
+          fields:
+              采购计划:
+                first_available: true
+
+  - code: pay-contract-purchase-plan-popup
+    name: 新增政府采购合同并选择采购计划和采购供应商
+    user: 15747894789
+    steps:
+      - action: open_menu
+        menu_path: 合同管理>>付款合同>>付款合同登记
+
+      - component: toolbar
+        operation: click
+        target:
+          label: 新增
+          sub_label: 政府采购合同
+
+      - component: form
+        operation: fill
+        target:
+          fields:
+              采购计划:
+                first_available: true
+              采购供应商:
+                filter:
+                  conditions:
+                    - field: 供应商名称
+                      equals: 百货公司
+                match:
+                  column: 供应商名称
+                  equals: 百货公司

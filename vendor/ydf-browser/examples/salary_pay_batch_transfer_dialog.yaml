@@ -1,0 +1,51 @@
+suite:
+  code: salary_pay_batch_transfer_dialog
+  name: 统发批次设置双列表配置
+  description: 验证子表工具栏打开双列表选择窗口，选择待选支付任务类型后生成子表数据
+  tenant: 财政一体化
+cases:
+  - code: configure-pay-task-type
+    name: 配置支付任务类型
+    description: 编辑 009 测试批次，配置 002 代缴个人所得税并验证子表即时生成数据
+    user: 默认用户
+    default_org: "049002"
+    steps:
+      - action: open_menu
+        menu_path: 薪酬管理>>工资统发设置>>统发批次设置
+
+      - component: tree
+        operation: select
+        target:
+          name: 搜索树
+          label: 009 测试批次
+
+      - component: toolbar
+        operation: click
+        target:
+          label: 编辑
+
+      - component: toolbar
+        operation: click
+        target:
+          label: 设置支付任务类型
+
+      - component: transfer_dialog
+        operation: select
+        target:
+          title: 支付任务类型配置
+          left:
+            matches:
+              - column: 支付任务类型
+                equals: 002 代缴个人所得税
+          move: to_right
+          confirm: true
+
+      - component: table
+        operation: assert_row_values
+        target:
+          match:
+            column: 支付任务类型代码
+            equals: "002"
+          fields:
+            支付任务类型名称: 代缴个人所得税
+            申请方式: 单位申请

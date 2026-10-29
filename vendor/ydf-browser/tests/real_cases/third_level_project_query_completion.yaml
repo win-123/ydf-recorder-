@@ -1,0 +1,42 @@
+# Bug 现象：二上三级项目细化的 query.search 等待约 17.5 秒后才执行行选择。
+# 原因：编制和草稿表格在模板配置中都可见，查询未按运行时可见性确定唯一目标表格。
+# 修复：复用共享区域可见性筛选和表格作用域解析，以当前可见表格的刷新信号结束等待。
+# 边界：多个可见表格或缺少可见性证据时不任选目标，保留既有兼容兜底。
+# 前置数据：默认组织 255001 存在项目名称“三级项目名称1”、项目状态“未细化”的业务行。
+# 预期：查询报告 completion_signal=target_component、fallback_used=false，行选择和行值断言通过。
+# 数据影响：仅查询、勾选和读取业务行，不细化、不保存、不提交。
+# run: ./.venv/bin/python -m ydf_browser.cli run --dsl tests/real_cases/third_level_project_query_completion.yaml --env t221 --headless --performance
+
+suite:
+  code: third-level-project-query-completion
+  name: 二上三级项目细化-查询完成信号真实回归
+  tenant: 自动化内控
+  default_org: "255001"
+cases:
+  - code: query-visible-table
+    name: 查询唯一可见表格后选择并核对业务行
+    user: "15500100142"
+    tags: [regression]
+    steps:
+      - action: open_menu
+        menu_path: 预算编制>>部门预算编制>>二上预算编制>>二上三级项目细化
+      - component: query
+        operation: search
+        target:
+          conditions:
+            - field: 项目名称
+              equals: 三级项目名称
+      - component: table_row_selection
+        operation: select
+        target:
+          match:
+            column: 项目状态
+            equals: 未细化
+      - component: table
+        operation: assert_row_values
+        target:
+          match:
+            column: 项目名称
+            equals: 三级项目名称1
+          fields:
+            项目状态: 未细化

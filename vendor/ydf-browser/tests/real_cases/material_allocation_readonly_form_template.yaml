@@ -1,0 +1,45 @@
+# 来源：领用分配填写计量单位时报“表格名称未匹配: target.table=物资信息”。
+# 根因：基本信息全部声明 props.readOnly: 1，平台以无输入控件 fieldid 的文本渲染；
+# 动态模板已返回且物资信息表格可交互，但就绪检查仍要求基本信息输入控件出现。
+# 最终修复：仅对可见表单字段全部明确只读的模板，以目标表格的唯一可交互工作面判定就绪。
+# 失败关闭边界：可编辑字段延迟出现、目标表格缺失/遮挡及跨 frame 多工作面仍不得提前应用。
+# 环境基线：t53，高校科研，default_org=101001，存在未分配单据 LY202600000007。
+# 预期：分配点击后应用 WZCKGLLR，物资信息解析为 wzxx_table，计量单位填写后回读为“箱”。
+# 数据影响：只打开既有单据并修改未保存的页面值；不保存、不提交、不选择库存、不出库。
+# 数据漂移时按前置数据不足处理，不自动替换单据或物资。
+# run: ./.venv/bin/python -m ydf_browser.cli run --dsl tests/real_cases/material_allocation_readonly_form_template.yaml --env t53 --headless
+suite:
+  code: material-allocation-readonly-form-template
+  name: 领用分配只读基本信息模板就绪回归
+  tenant: 高校科研
+  default_org: "101001"
+cases:
+  - code: readonly-form-table-template
+    name: 分配后按新模板填写并回读计量单位
+    user: 15001365881
+    steps:
+      - action: open_menu
+        menu_path: 易耗品物资 >> 物资领用 >> 领用分配
+      - component: table_row_action
+        operation: click
+        target:
+          action: 分配
+          match:
+            column: 单据编号
+            equals: LY202600000007
+      - component: editable_table
+        operation: fill_row
+        target:
+          table: 物资信息
+          row_number: -1
+          fields:
+            计量单位: 箱
+      - component: table
+        operation: assert_row_values
+        target:
+          table: 物资信息
+          match:
+            column: 物资名称
+            equals: A4复印纸63247688
+          fields:
+            计量单位: 箱

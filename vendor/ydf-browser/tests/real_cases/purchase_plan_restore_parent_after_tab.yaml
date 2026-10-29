@@ -1,0 +1,88 @@
+# 真实回归环境基线（2026-08-20；仅作运行前核对，不参与 DSL 解析）
+# base_url: https://tv5-ydf.yonyougov.top
+# tenant: 财政一体化
+# user_alias: 15747894789
+# default_org: "101001"
+# expected: 保存采购计划草稿后点击“待提交”，后续行选择使用父列表 upPlanDataTable。
+# data_impact: 每次运行保存一条“页签恢复回归”测试草稿；不提交、不删除。
+# run: ./.venv/bin/python -m ydf_browser.cli run --dsl tests/real_cases/purchase_plan_restore_parent_after_tab.yaml --headless --window-size 1600x1400
+
+suite:
+  code: real-regression-purchase-plan-restore-parent-after-tab
+  name: 采购计划-页签返回父列表真实回归
+  description: 验证动态子模板含主表格时点击父列表页签可恢复父 manifest
+  tenant: 财政一体化
+  default_org: "101001"
+cases:
+  - code: purchase-plan-restore-parent-after-tab
+    name: 保存草稿后点击待提交并选择父列表行
+    user: 15747894789
+    tags: [regression]
+    steps:
+      - action: open_menu
+        menu_path: 采购管理>>采购计划>>采购计划编制
+
+      - component: toolbar
+        operation: click
+        target:
+          label: 新增
+          sub_label: 采购计划
+
+      - component: form
+        operation: fill
+        target:
+          fields:
+            采购计划名称: 页签恢复回归{{random.suffix}}
+            采购方式: 电子卖场
+            单位联系人: 测试
+            联系电话: "13800138000"
+            使用虚拟预算: 是
+            预算项目:
+              first_available: true
+
+      - component: editable_table
+        operation: add_row
+        target:
+          label: 新增
+          table: 计划明细
+          editor: form
+
+      - component: form
+        operation: fill
+        target:
+          fields:
+            采购品目:
+              filter: A02010105
+              match:
+                column: 政府采购品目代码
+                equals: A02010105
+            采购标的: 货物
+            单价: 7000
+            数量: 1
+            单位: 台
+            一般公共预算资金: 7000
+
+      - component: toolbar
+        operation: click
+        target:
+          label: 确定
+
+      - component: toolbar
+        operation: click
+        target:
+          label: 保存
+
+      - component: notification
+        operation: assert
+        target:
+          message: 保存成功
+
+      - component: tab
+        operation: click
+        target:
+          label: 待提交
+
+      - component: table_row_selection
+        operation: select
+        target:
+          row_numbers: [1]

@@ -1,0 +1,34 @@
+{
+  "cases": [
+    {
+      "name": "green_missing_response_body",
+      "facts": {
+        "dsl_success": true,
+        "business_assertion": "passed",
+        "capture_unavailable_reason": "size_limit_exceeded",
+        "local_forward_hit": true
+      },
+      "expected": {
+        "tool_outcome": "passed",
+        "verification_status": "not_verified",
+        "reason_code": "evidence_unavailable",
+        "business_root_cause_allowed": false
+      }
+    },
+    {
+      "name": "green_without_local_forward_hit",
+      "facts": {
+        "dsl_success": true,
+        "business_assertion": "passed",
+        "response_body_complete": true,
+        "local_forward_hit": false
+      },
+      "expected": {
+        "tool_outcome": "passed",
+        "verification_status": "not_verified",
+        "reason_code": "evidence_unavailable",
+        "business_root_cause_allowed": false
+      }
+    }
+  ]
+}

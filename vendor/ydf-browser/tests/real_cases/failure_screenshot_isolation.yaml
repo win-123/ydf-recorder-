@@ -1,0 +1,47 @@
+# Bug 现象：串行运行多个失败用例时，后续错误截图数量递增，混入前面用例的截图。
+# 根因：浏览器运行时跨用例复用诊断清单，执行器将历史文件全部附到当前失败步骤。
+# 修复：按步骤开始时的清单边界，仅引用当前步骤新增的诊断文件。
+# 安全边界：只打开列表并查找固定不存在的弹窗按钮，不保存、不提交业务数据。
+# 预期：三个用例均在 dialog.click 失败；每个失败步骤及 HTML 详情只含自己的截图。
+# 本用例以失败报告验证诊断隔离，CLI 非零退出码是预期；需核对报告中的截图归属。
+# run: ./.venv/bin/python -m ydf_browser.cli run --dsl tests/real_cases/failure_screenshot_isolation.yaml --headless --concurrency 1 --report-file /tmp/failure-screenshot-isolation/report.json
+suite:
+  code: failure-screenshot-isolation
+  name: 连续失败用例截图隔离
+  tenant: 财政一体化
+  default_org: 南昌市局本级
+  on_case_failure: continue
+cases:
+  - code: failure-first
+    name: 第一个失败用例
+    user: 15500100121
+    tags: [regression]
+    steps:
+      - action: open_menu
+        menu_path: 三级项目管理
+      - component: dialog
+        operation: click
+        target:
+          label: YDF_BROWSER_MISSING_DIALOG_FIRST
+  - code: failure-second
+    name: 第二个失败用例
+    user: 15500100121
+    tags: [regression]
+    steps:
+      - action: open_menu
+        menu_path: 三级项目管理
+      - component: dialog
+        operation: click
+        target:
+          label: YDF_BROWSER_MISSING_DIALOG_SECOND
+  - code: failure-third
+    name: 第三个失败用例
+    user: 15500100121
+    tags: [regression]
+    steps:
+      - action: open_menu
+        menu_path: 三级项目管理
+      - component: dialog
+        operation: click
+        target:
+          label: YDF_BROWSER_MISSING_DIALOG_THIRD

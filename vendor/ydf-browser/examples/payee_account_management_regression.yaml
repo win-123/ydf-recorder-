@@ -1,0 +1,167 @@
+suite:
+  code: payee_account_management_regression
+  name: 收款人账户管理
+  description: 覆盖收款人账户管理已探索稳定链路的长期回归测试集
+  tenant: 财政一体化
+cases:
+  - code: row-detail
+    name: 行级详情
+    description: 按账户名称查询 Z04，hover 目标行并点击行级详情，再取消返回
+    user: 默认用户
+    default_org: "049002"
+    steps:
+      - action: open_menu
+        menu_path: 集中支付>>基础管理>>收款人账户管理
+
+      - component: query
+        operation: search
+        target:
+          conditions:
+            - field: 账户名称
+              equals: Z04
+
+      - component: table_row_action
+        operation: click
+        target:
+          action: 详情
+          match:
+            column: 账户名称
+            equals: Z04
+
+      - component: toolbar
+        operation: click
+        target:
+          label: 取消
+
+  - code: row-edit-cancel
+    name: 行级编辑后取消
+    description: 按账户名称查询 Z04，hover 目标行并点击行级编辑，不保存直接取消返回
+    user: 默认用户
+    default_org: "049002"
+    steps:
+      - action: open_menu
+        menu_path: 集中支付>>基础管理>>收款人账户管理
+
+      - component: query
+        operation: search
+        target:
+          conditions:
+            - field: 账户名称
+              equals: Z04
+
+      - component: table_row_action
+        operation: click
+        target:
+          action: 编辑
+          match:
+            column: 账户名称
+            equals: Z04
+
+      - component: toolbar
+        operation: click
+        target:
+          label: 取消
+
+  - code: create-empty-save-warning
+    name: 新增空保存提示
+    description: 点击新增后空表单保存，断言账户名称必填提示，再取消恢复列表上下文
+    user: 默认用户
+    default_org: "049002"
+    steps:
+      - action: open_menu
+        menu_path: 集中支付>>基础管理>>收款人账户管理
+
+      - component: toolbar
+        operation: click
+        target:
+          label: 新增
+
+      - component: toolbar
+        operation: click
+        target:
+          label: 保存
+
+      - component: notification
+        operation: assert
+        target:
+          type: error
+          contains: 账户名称不能为空
+
+      - component: toolbar
+        operation: click
+        target:
+          label: 取消
+          restore_previous: true
+
+      - component: query
+        operation: search
+        target:
+          conditions: []
+
+  - code: query-by-account-name
+    name: 账户名称查询
+    description: 按账户名称 Z03 查询，并验证列表账户名称列
+    user: 默认用户
+    default_org: "049002"
+    steps:
+      - action: open_menu
+        menu_path: 集中支付>>基础管理>>收款人账户管理
+
+      - component: query
+        operation: search
+        target:
+          conditions:
+            - field: 账户名称
+              equals: Z03
+
+      - component: table
+        operation: assert_column_values
+        target:
+          column: 账户名称
+          equals: Z03
+
+  - code: export-selected-row
+    name: 勾选后导出
+    description: 查询 Z04 后勾选目标行，点击导出并捕获下载
+    user: 默认用户
+    default_org: "049002"
+    steps:
+      - action: open_menu
+        menu_path: 集中支付>>基础管理>>收款人账户管理
+
+      - component: query
+        operation: search
+        target:
+          conditions:
+            - field: 账户名称
+              equals: Z04
+
+      - component: table_row_selection
+        operation: select
+        target:
+          match:
+            column: 账户名称
+            equals: Z04
+
+      - component: toolbar
+        operation: click
+        target:
+          label: 导出
+
+  - code: import-empty-template-failure
+    name: 空模板导入失败真实原因
+    description: 上传已验证的空导入模板，断言从文件行详情菜单提取到真实失败原因
+    user: 默认用户
+    default_org: "049002"
+    steps:
+      - action: open_menu
+        menu_path: 集中支付>>基础管理>>收款人账户管理
+
+      - component: import
+        operation: upload
+        target:
+          label: 导入
+          file: examples/fixtures/payee_account/收款人账户管理导入模板_1806195728602103815-3.xlsx
+          assert:
+            status: failure
+            error_contains: 收款人信息不能为空

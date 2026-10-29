@@ -1,0 +1,31 @@
+{
+  "status": "not_verified",
+  "reason_code": "evidence_unavailable",
+  "business_assertions_passed": true,
+  "runs": [
+    {
+      "phase": "green",
+      "qualified": false,
+      "dsl_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "run_dir": "runs/green-1",
+      "tool_outcome": "passed",
+      "report": "runs/green-1/report.json",
+      "assertion_receipt": {},
+      "request_id": null,
+      "flow_request_ids": {"precondition": null, "mutation": null, "postcondition": null},
+      "api_business_id": null,
+      "ui_business_id": "AI-001",
+      "local_forward_hit": false
+    }
+  ],
+  "cleanup": {
+    "success": true,
+    "identifiers": ["AI-001"],
+    "last_known_state": "removed"
+  },
+  "fingerprints": {
+    "verified": true,
+    "before": {},
+    "after": {}
+  }
+}

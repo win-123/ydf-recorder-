@@ -1,0 +1,89 @@
+suite:
+  code: personnel_info_multi_reference_create
+  name: 在职人员信息库多形态参照录入
+  description: 新增在职人员，覆盖下拉参照、弹出列表参照、弹出树形参照和弹出表格参照
+  tenant: YonDiF-2609产品开发
+cases:
+  - code: create-person-with-multiple-reference-types
+    name: 新增人员并校验列表数据
+    description: 选择单位树节点后新增人员，录入基本信息和工资信息，再回列表查询校验
+    user: 默认用户
+    default_org: "049002"
+    steps:
+      - action: open_menu
+        menu_path: 在职人员信息库
+
+      - component: tree
+        operation: select
+        target:
+          label: 001001 **省财政厅本级
+
+      - component: toolbar
+        operation: click
+        target:
+          label: 新增
+
+      - component: form
+        operation: fill
+        target:
+          fields:
+            姓名: codex测试姓名{{random.suffix}}
+            性别: 男
+            证件类型: 01 身份证
+            证件号码: "{{random.id_card}}"
+            民族: 51 独龙族
+            国别: 142 中国
+            学历: 13 博士
+            人员代码: codex测试姓名{{random.suffix}}
+            享受待遇级别: 3 其他人员
+            在职人员来源: 2 人员调配
+            人员身份: 12 专业技术类
+            职务: 99 其他
+            职级: 99 其他
+            人员状态: 32 离岗创业
+            是否财政供养人员: 1 是
+            是否工资统发: 1 是
+            单位内部机构: 111 测试部
+            手机号: "{{random.mobile}}"
+
+      - component: tab
+        operation: click
+        target:
+          label: 工资信息
+
+      - component: form
+        operation: fill
+        target:
+          fields:
+            工资卡1卡号: "{{random.bank_card}}"
+            工资卡1开户银行:
+              filter:
+                conditions:
+                  - field: 银行网点名称
+                    equals: 中国工商银行绍兴胜利路支行
+              match:
+                column: 银行网点名称
+                equals: 中国工商银行绍兴胜利路支行
+
+      - component: toolbar
+        operation: click
+        target:
+          label: 保存
+
+      - component: query
+        operation: search
+        target:
+          conditions:
+            - field: 姓名
+              equals: codex测试姓名{{random.suffix}}
+
+      - component: table
+        operation: assert_row_values
+        target:
+          match:
+            column: 姓名
+            equals: codex测试姓名{{random.suffix}}
+          fields:
+            姓名: codex测试姓名{{random.suffix}}
+            人员代码: codex测试姓名{{random.suffix}}
+            证件号码: "{{random.id_card}}"

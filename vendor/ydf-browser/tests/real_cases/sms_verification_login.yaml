@@ -1,0 +1,22 @@
+# 只验证认证、上下文与菜单初始化；表格绑定不属于此用例范围。
+# d25tj 只读认证验收：首次运行验证短信登录，再次运行验证认证会话复用。
+# 手工衔接回归：先以同一环境执行无 DSL run 并关闭浏览器，再运行本用例，验证认证复用。
+# 新登录验证可显式使用 run --force-login；不要反复消耗短信配额。
+suite:
+  code: real-sms-verification-login
+  name: 短信登录与认证会话复用
+  tenant: YonDiF产品研发
+  default_org: '109900000'
+cases:
+  - code: sms-login-readonly
+    name: 登录后打开项目建议
+    user: 默认用户
+    steps:
+      - action: open_menu
+        menu_path: 项目库>>项目建议>>项目建议
+  - code: sms-session-reuse
+    name: 同次运行复用认证后再次打开菜单
+    user: 默认用户
+    steps:
+      - action: open_menu
+        menu_path: 项目库>>项目建议>>项目建议

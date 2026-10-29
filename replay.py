@@ -81,14 +81,44 @@ class ReplayOptions:
 # ── 纯函数（便于测试）─────────────────────────────────────
 
 
+def _frozen_resources_dir() -> Path | None:
+    """打包态（PyInstaller）下应用 Resources 目录；非打包返回 None。
+
+    macOS .app: <exe 位于 Contents/Resources/app/YonDiFRecorder/> → Resources
+    Windows:    <exe 位于 app/YonDiFRecorder/> → 逐级向上找 Resources / exe 同级
+    """
+    if not getattr(sys, "frozen", False):
+        return None
+    exe = Path(sys.executable).resolve()
+    for cand in (exe.parent.parent / "Resources", exe.parent / "Resources", exe.parent):
+        if cand.is_dir():
+            return cand
+    return exe.parent
+
+
+def _runtime_base_candidates(root: Path | None = None) -> list[Path]:
+    """运行时 venv / 版本标记的可能位置（打包态优先查应用 Resources）。"""
+    bases: list[Path] = []
+    res = _frozen_resources_dir()
+    if res is not None:
+        bases.append(res / "ydf-browser-runtime")
+        bases.append(res / "app" / "ydf-browser-runtime")
+    bases.append((root or RECORD_ROOT).resolve() / ".ydf-browser-runtime")
+    return bases
+
+
 def find_source_dir(root: Path | None = None) -> Path | None:
-    """定位 ydf-browser 源码目录（子模块 → 项目内 → 兄弟目录）。"""
+    """定位 ydf-browser 源码目录（子模块 → 项目内 → 兄弟目录 → 打包内 vendor）。"""
     base = (root or RECORD_ROOT).resolve()
     candidates = [
         base / "vendor" / "ydf-browser",
         base / "ydf-browser",
         base.parent / "ydf-browser",
     ]
+    res = _frozen_resources_dir()
+    if res is not None:
+        candidates.append(res / "vendor" / "ydf-browser")
+        candidates.append(res / "app" / "vendor" / "ydf-browser")
     for cand in candidates:
         if (cand / RUNTIME_MARKER / "__init__.py").is_file() and (cand / "pyproject.toml").is_file():
             return cand
@@ -97,9 +127,21 @@ def find_source_dir(root: Path | None = None) -> Path | None:
 
 def runtime_python(root: Path | None = None) -> Path | None:
     """运行时 venv 的 python 解释器路径（跨平台：bin/ 或 Scripts/）。"""
-    base = (root or RECORD_ROOT).resolve() / ".ydf-browser-runtime"
-    for rel in ("bin/python", "bin/python3", "Scripts/python.exe"):
-        p = base / rel
+    for base in _runtime_base_candidates(root):
+        for rel in ("bin/python", "bin/python3", "Scripts/python.exe"):
+            p = base / rel
+            if p.is_file():
+                return p
+    return None
+
+
+def bundled_cli_command() -> Path | None:
+    """打包态内置的 ydfbrowser-cli 独立可执行文件（PyInstaller 子产物）。"""
+    res = _frozen_resources_dir()
+    if res is None:
+        return None
+    for name in ("ydfbrowser-cli/ydfbrowser-cli", "ydfbrowser-cli/ydfbrowser-cli.exe"):
+        p = res / name
         if p.is_file():
             return p
     return None
@@ -161,9 +203,14 @@ def query_runtime_version(root: Path | None = None) -> str | None:
     优先读 install_runtime 写入的版本标记文件（零开销），
     否则派生子进程 ``import ydf_browser`` 查询。
     """
-    base = (root or RECORD_ROOT).resolve() / ".ydf-browser-runtime"
-    marker = base / _VERSION_MARKER
-    if marker.is_file():
+    base = None  # 版本标记按候选位置查找
+    marker = None
+    for cand_base in _runtime_base_candidates(root):
+        cand_marker = cand_base / _VERSION_MARKER
+        if cand_marker.is_file():
+            marker = cand_marker
+            break
+    if marker is not None:
         text = marker.read_text(encoding="utf-8").strip()
         if text:
             return text
@@ -195,9 +242,11 @@ def check_runtime_version(root: Path | None = None) -> str | None:
     key = str((root or RECORD_ROOT).resolve())
     if key in _version_check_cache:
         return _version_check_cache[key]
-    base = (root or RECORD_ROOT).resolve() / ".ydf-browser-runtime"
-    marker = base / _VERSION_MARKER
-    if runtime_python(root) is None and not marker.is_file():
+    has_marker = any(
+        (base / _VERSION_MARKER).is_file()
+        for base in _runtime_base_candidates(root)
+    )
+    if runtime_python(root) is None and not has_marker:
         # 未使用内嵌运行时（PATH / env / interpreter 形态），不校验
         _version_check_cache[key] = None
         return None
@@ -219,8 +268,11 @@ def check_runtime_version(root: Path | None = None) -> str | None:
 
 
 def build_run_args(options: ReplayOptions) -> list[str]:
-    """组装 ``ydf-browser run`` 的参数列表（不含可执行文件本身）。"""
-    args = ["run", str(options.yaml_path), "--env", options.env_name]
+    """组装 ``ydf-browser run`` 的参数列表（不含可执行文件本身）。
+
+    ydf-browser ≥0.1.42 的 CLI 以 ``--dsl`` 传入 DSL 文件（无位置参数）。
+    """
+    args = ["run", "--dsl", str(options.yaml_path), "--env", options.env_name]
     if options.config:
         args += ["--config", str(options.config)]
     if options.headless:
@@ -244,7 +296,7 @@ def build_run_args(options: ReplayOptions) -> list[str]:
 
 def build_validate_args(options: ReplayOptions) -> list[str]:
     """组装 ``ydf-browser validate`` 的参数列表（不开浏览器，纯 YAML 校验）。"""
-    args = ["validate", str(options.yaml_path), "--env", options.env_name]
+    args = ["validate", "--dsl", str(options.yaml_path), "--env", options.env_name]
     if options.config:
         args += ["--config", str(options.config)]
     for code in options.case_codes:
@@ -293,6 +345,11 @@ def discover_command(
     bin_value = env.get("YDF_BROWSER_BIN", "").strip()
     if bin_value:
         return DiscoveryResult(command=_bin_command(bin_value), source="env:YDF_BROWSER_BIN")
+
+    # 1.5 打包态内置的 ydfbrowser-cli 独立可执行文件（桌面应用零依赖形态）
+    bundled = bundled_cli_command()
+    if bundled:
+        return DiscoveryResult(command=[str(bundled)], source="bundled-cli")
 
     # 2. 运行时 venv
     venv_py = runtime_python(root)
@@ -412,8 +469,23 @@ def run_replay(options: ReplayOptions, summary_only: bool = False) -> tuple[int,
 # ── CLI 处理器（由 cli.py 分发）───────────────────────────
 
 
+def resolve_config_path(explicit: str | None = None) -> Path | None:
+    """解析回放配置文件：显式参数 → 用户配置（YDF_RECORDER_CONFIG）→ 内置配置。"""
+    if explicit:
+        return Path(explicit)
+    env_cfg = os.environ.get("YDF_RECORDER_CONFIG", "").strip()
+    if env_cfg and Path(env_cfg).is_file():
+        return Path(env_cfg)
+    res = _frozen_resources_dir()
+    if res is not None:
+        bundled = res / "config" / "env.yaml"
+        if bundled.is_file():
+            return bundled
+    return default_config_path()
+
+
 def _options_from_args(args, yaml_path: str) -> ReplayOptions:
-    config = getattr(args, "config", None) or default_config_path()
+    config = resolve_config_path(getattr(args, "config", None))
     return ReplayOptions(
         yaml_path=yaml_path,
         env_name=getattr(args, "env", "ydf"),

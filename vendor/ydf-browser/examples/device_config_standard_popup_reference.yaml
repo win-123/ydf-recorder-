@@ -1,0 +1,47 @@
+suite:
+  code: device_config_standard_popup_reference
+  name: 设备配置标准弹出参照
+  description: 编辑设备配置标准并通过弹出参照选择政府采购品目
+  tenant: 财政一体化
+cases:
+  - code: edit-government-purchase-item
+    name: 修改政府采购品目
+    description: 将设备代码 1121212121212 的政府采购品目改为 C99000000 其他服务，并回列表校验
+    user: 默认用户
+    default_org: "049002"
+    steps:
+      - action: open_menu
+        menu_path: 设备配置标准
+
+      - component: table_row_action
+        operation: click
+        target:
+          action: 编辑
+          match:
+            column: 设备代码
+            equals: "1121212121212"
+
+      - component: form
+        operation: fill
+        target:
+          fields:
+            政府采购品目: C99000000 其他服务
+
+      - component: toolbar
+        operation: click
+        target:
+          label: 保存
+
+      - component: query
+        operation: search
+        target:
+          conditions: []
+
+      - component: table
+        operation: assert_row_values
+        target:
+          match:
+            column: 设备代码
+            equals: "1121212121212"
+          fields:
+            政府采购品目: 其他服务

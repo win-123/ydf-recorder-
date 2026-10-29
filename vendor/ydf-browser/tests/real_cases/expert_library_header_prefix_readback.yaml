@@ -1,0 +1,110 @@
+# 回归：姓名以列名“专家姓名”开头时，列值、行值与行级动作必须保留完整业务值。
+# 数据影响：每次保存一条随机姓名的专家记录，失败时保留记录供诊断。
+suite:
+  code: expert-library-header-prefix-readback
+  name: 专家库列名前缀值回读回归
+  description: 验证列名前缀业务值的表格回读、详情行定位和只读表单回读
+  tenant: 财政一体化
+  default_org: "101001"
+  fiscal_year: "2026"
+  on_case_failure: stop_suite
+cases:
+  - code: create-expert-readback
+    name: 新增专家并回读验证
+    description: 创建唯一专家记录，校验表格列值和行值，并在详情页回读只读字段
+    user: "15001365888"
+    default_org: "101001"
+    tags: [create, readback]
+    steps:
+      - action: open_menu
+        menu_path: 预算绩效>>专家库>>专家库
+      - component: tab
+        operation: click
+        target:
+          label: 全部
+      - component: query
+        operation: search
+        target:
+          conditions:
+            - field: 专家姓名
+              equals: 专家姓名{{random.suffix}}
+      - component: table
+        operation: assert_empty
+        target:
+          column: 专家姓名
+      - component: tab
+        operation: click
+        target:
+          label: 专家库
+      - component: toolbar
+        operation: click
+        target:
+          label: 新增
+      - component: form
+        operation: fill
+        target:
+          fields:
+            姓名: 专家姓名{{random.suffix}}
+            性别: 1 男
+            证件类型: 01 身份证
+            证件号: "{{random.id_card}}"
+            出生年月: "1980-01-01"
+            民族: 01 汉族
+            政治面貌: 001 中共党员
+            工作单位: 专家库新增验收单位20260928-2147
+            电子邮箱: expert.20260928.2147@example.com
+            工作年限: "10"
+            专家类别: 0104 绩效管理
+            最高学历: 2 本科
+            所学专业: 010101 马克思主义哲学
+            最高学位: 2 学士
+            手机号码: "{{random.mobile}}"
+            固定电话: "010-1234567"
+      - component: toolbar
+        operation: click
+        target:
+          label: 保存
+      - component: tab
+        operation: click
+        target:
+          label: 全部
+      - component: query
+        operation: search
+        target:
+          conditions:
+            - field: 专家姓名
+              equals: 专家姓名{{random.suffix}}
+      - component: table
+        operation: assert_column_values
+        target:
+          column: 专家姓名
+          equals: 专家姓名{{random.suffix}}
+      - component: table
+        operation: assert_row_values
+        target:
+          match:
+            column: 专家姓名
+            equals: 专家姓名{{random.suffix}}
+          fields:
+            专家姓名: 专家姓名{{random.suffix}}
+            工作单位: 专家库新增验收单位20260928-2147
+      - component: table_row_action
+        operation: click
+        target:
+          action: 详情
+          match:
+            column: 专家姓名
+            equals: 专家姓名{{random.suffix}}
+      - component: form
+        operation: assert_values
+        target:
+          fields:
+            姓名: 专家姓名{{random.suffix}}
+            性别: 1 男
+            工作单位: 专家库新增验收单位20260928-2147
+            电子邮箱: expert.20260928.2147@example.com
+            工作年限: '10'
+            专家类别: 0104 绩效管理
+            最高学历: 2 本科
+            所学专业: 010101 马克思主义哲学
+            手机号码: '{{random.mobile}}'

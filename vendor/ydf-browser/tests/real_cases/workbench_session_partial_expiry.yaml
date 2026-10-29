@@ -1,0 +1,18 @@
+# 症状：API 探测通过但菜单出现登录框；关闭浏览器后会连带报 Page.reload TargetClosedError。
+# 根因：工作台登录态可单独失效，同上下文复用路径此前未检查工作台首页。
+# 修复：准备阶段检查入口，先刷新现有会话，仍失效时最多重新认证一次。
+# 边界：未知响应与网络错误直接阻断，不重放业务；本用例只读，不保存签章。
+# 基线：缓存部分失效时出现登录框；预期：原菜单正常初始化，有效会话继续复用。
+# 运行：./.venv/bin/python -m ydf_browser.cli run --dsl tests/real_cases/workbench_session_partial_expiry.yaml
+suite:
+  code: workbench-session-partial-expiry
+  name: 业务会话有效但工作台失效恢复
+  tenant: 财政一体化
+  default_org: 101001
+cases:
+- code: open-menu-after-session-probe
+  name: 恢复工作台认证后打开集中支付全景
+  user: 15001365888
+  steps:
+  - action: open_menu
+    menu_path: 集中支付全景

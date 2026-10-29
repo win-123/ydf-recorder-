@@ -1,0 +1,49 @@
+# 真实回归环境基线（2026-09-04；仅作运行前核对，不参与 DSL 解析）
+# tenant: 财政一体化
+# user_alias: 15500100112
+# default_org: "360000000"
+# menu_path: 国库单一账户业务申请
+# expected: “核算内容”必须绑定到 sqxx_form_accountingCongtentCode_search_input，选择
+#   “002002 工会经费”后，form.assert_values 必须读取到已提交的页面值。
+# data_impact: 用例不保存、不提交，不产生业务单据。
+#
+# Bug 现象: YDFTreeSelect 同一平台精确身份下存在多个包装节点时，form.fill 报
+#   “表单字段[核算内容]的平台精确身份状态不兼容”。
+# 原因: 模板解析未生成父表单字段的 _search_input 派生身份，binder 无法收敛到同根唯一输入控件。
+# run: ./.venv/bin/python -m ydf_browser.cli run --dsl tests/real_cases/account_opening_accounting_content_tree_select.yaml
+
+suite:
+  code: real-regression-account-opening-accounting-content-tree-select
+  name: 国库单一账户-核算内容树选择真实回归
+  description: 验证树选择字段从平台包装节点收敛到父表单派生搜索输入并提交选值
+  tenant: 财政一体化
+  default_org: "360000000"
+cases:
+  - code: account-opening-accounting-content-tree-select
+    name: 开立申请选择核算内容
+    user: 15500100112
+    steps:
+      - action: open_menu
+        menu_path: 国库单一账户业务申请
+
+      - component: tree
+        operation: select
+        target:
+          label: 1 国库单一账户
+
+      - component: toolbar
+        operation: click
+        target:
+          label: 开立
+
+      - component: form
+        operation: fill
+        target:
+          fields:
+            核算内容: 002002 工会经费
+
+      - component: form
+        operation: assert_values
+        target:
+          fields:
+            核算内容: 002002 工会经费

@@ -1,0 +1,43 @@
+suite:
+  code: material_stockin_material_category_popup_reference
+  name: 入库填报物资分类树表参照
+  tenant: 财政一体化
+  default_org: "101001"
+
+cases:
+  - code: fill-material-category-tree-table-reference
+    name: 物资入库明细选择物资分类
+    description: 验证可编辑表格 YDFInput 列收到结构化树表参照目标时，不会把对象字符串写入单元格。
+    user: 用户5888
+    steps:
+      - action: open_menu
+        menu_path: 易耗品物资 >> 入库登记 >> 入库填报
+
+      - component: toolbar
+        operation: click
+        target:
+          label: 新增
+
+      - component: form
+        operation: fill
+        target:
+          fields:
+            来源方式: 采购
+            备注: A3复印纸
+
+      - component: editable_table
+        operation: add_row
+        target:
+          label: 新增
+          table: 物资入库
+
+      - component: editable_table
+        operation: fill_row
+        target:
+          table: 物资入库
+          row_number: -1
+          fields:
+            物资分类:
+              tree:
+                label: A05040101 复印纸
+              first_available: true

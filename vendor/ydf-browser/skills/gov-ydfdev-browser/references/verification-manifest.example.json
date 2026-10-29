@@ -1,0 +1,21 @@
+{
+  "inputs": {
+    "bug": "original bug description",
+    "business_repo": "/private/path/to/business-repo",
+    "dsl": "/private/path/to/case.yaml",
+    "cleanup_dsl": "/private/path/to/cleanup.yaml",
+    "readiness": "/private/path/to/readiness.json",
+    "forwarding": ["/business/**=http://127.0.0.1:62871"]
+  },
+  "baseline": {
+    "business_repo_head": "0123456789abcdef",
+    "business_repo_porcelain": [],
+    "file_sha256": {}
+  },
+  "fingerprints": {
+    "release_package_sha256": "sha256",
+    "ydf_browser": "sha256",
+    "agents_skill": "sha256",
+    "helper_sha256": "sha256"
+  }
+}

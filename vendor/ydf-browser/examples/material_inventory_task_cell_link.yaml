@@ -1,0 +1,31 @@
+suite:
+  code: material-inventory-task-cell-link
+  name: 盘点任务填报单元格链接示例
+  tenant: 财政一体化
+  default_org: "101001"
+
+cases:
+  - code: open-unchecked-task-by-code-link
+    name: 未盘点页签点击任务编码链接
+    user: 默认用户
+    steps:
+      - action: open_menu
+        menu_path: 易耗品物资 >> 物资盘点 >> 盘点任务填报
+
+      - component: tab
+        operation: click
+        target:
+          label: 未盘点
+
+      - component: query
+        operation: search
+        target:
+          conditions: []
+
+      - component: table
+        operation: click_cell_link
+        target:
+          match:
+            column: 序号
+            equals: 1
+          column: 任务编码

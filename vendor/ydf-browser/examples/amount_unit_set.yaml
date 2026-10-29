@@ -1,0 +1,17 @@
+suite:
+  code: amount-unit-set
+  name: 金额单位公共组件
+  tenant: 财政一体化
+cases:
+  - code: set-yuan
+    name: 设置金额单位为元
+    user: 默认用户
+    default_org: 南昌市局本级
+    steps:
+      - action: open_menu
+        menu_path: 项目库>>收入项目>>收入项目管理
+
+      - component: amount_unit
+        operation: set
+        target:
+          value: 元

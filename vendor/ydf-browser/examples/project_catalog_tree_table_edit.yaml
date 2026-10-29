@@ -1,0 +1,47 @@
+suite:
+  code: project_catalog_tree_table_edit
+  name: 项目目录管理树形表格编辑
+  description: 通过非编码属性定位树形表格行后编辑三保标识目录并校验列表回写
+  tenant: 财政一体化
+cases:
+  - code: edit-expenditure-scope
+    name: 通过支出范围说明定位并编辑三保标识目录
+    description: 选择特定目标类后用非编码属性查找树形表格行，编辑三保标识目录并验证保存后的列表值
+    user: 默认用户
+    default_org: "049002"
+    steps:
+      - action: open_menu
+        menu_path: 项目目录管理
+
+      - component: tree
+        operation: select
+        target:
+          label: 3 特定目标类
+
+      - component: table_row_action
+        operation: click
+        target:
+          action: 编辑
+          match:
+            column: 支出范围说明
+            equals: 验证没有编码规则的属性查找test
+
+      - component: form
+        operation: fill
+        target:
+          fields:
+            三保标识目录: 004001 债务还本付息支出
+
+      - component: toolbar
+        operation: click
+        target:
+          label: 保存
+
+      - component: table
+        operation: assert_row_values
+        target:
+          match:
+            column: 支出范围说明
+            equals: 验证没有编码规则的属性查找test
+          fields:
+            三保标识: 004001 债务还本付息支出

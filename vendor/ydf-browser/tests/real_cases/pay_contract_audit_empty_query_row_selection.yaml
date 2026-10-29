@@ -1,0 +1,43 @@
+# 真实回归环境基线（2026-08-21；仅作运行前核对，不参与 DSL 解析）
+# base_url: https://tv5-ydf.yonyougov.top
+# tenant: 财政一体化
+# user_alias: 15747894789
+# default_org: "101001"
+# menu_path: 合同管理>>合同审核>>合同审核
+# expected: query.search 返回空列表后，table_row_selection.select 在第 3 步失败，且报告包含当前可见有效行数=0。
+# data_impact: 仅查询和失败关闭的行选择，不审核、不保存，不产生业务数据变更。
+# business_assertion: 不存在目标合同记录时不得把“搜索无结果”占位行当作第 1 条业务行。
+#
+# Bug 现象: query.search 结果为空，但 table_row_selection.select 把“搜索无结果”占位行当作业务行并返回成功，
+# 直到后续审核弹窗步骤才以未找到按钮失败。
+# 原因: 共享业务行判定只排除了“暂无数据”和“点击上方查询条件搜索数据”，未覆盖 WUI 的“搜索无结果”。
+# 解决: 在共享业务行判定及其异常回退路径中排除“搜索无结果”，沿用既有零有效行错误和限时重试。
+# 失败关闭边界: 只排除明确的空结果占位短语；真实无 checkbox 业务行仍保留行点击和 accepted_unconfirmed 兼容语义。
+# run: ./.venv/bin/python -m ydf_browser.cli run --dsl tests/real_cases/pay_contract_audit_empty_query_row_selection.yaml --headless --report-file /tmp/pay-contract-audit-empty-query-row-selection.json
+
+suite:
+  code: real-regression-pay-contract-audit-empty-query-row-selection
+  name: 付款合同审核-空查询结果行选择失败关闭真实回归
+  description: 验证空查询结果不会被表格行选择误判为业务行
+  tenant: 财政一体化
+  default_org: "101001"
+cases:
+  - code: pay-contract-audit-empty-query-row-selection
+    name: 空查询结果后选择第1行立即失败
+    user: 15747894789
+    tags: [regression]
+    steps:
+      - action: open_menu
+        menu_path: 合同管理>>合同审核>>合同审核
+
+      - component: query
+        operation: search
+        target:
+          conditions:
+            - field: 合同名称
+              equals: YDF_EMPTY_RESULT_8c11977e92904ad2b6d6
+
+      - component: table_row_selection
+        operation: select
+        target:
+          row_numbers: [1]

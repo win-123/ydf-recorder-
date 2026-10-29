@@ -1,0 +1,749 @@
+suite:
+  code: pm_est_mode_type_full
+  name: 编报模板分类
+  description: 覆盖编报模板分类工具栏按钮和行按钮的测试集草案
+  tenant: 财政一体化
+cases:
+  - code: toolbar-add-without-tree-warning
+    name: 未选择分类类型时点击新增提示
+    description: 验证顶层新增的业务前置条件，未选择左树具体分类类型时提示请选择具体分类类型
+    user: 默认用户
+    default_org: "049002"
+    steps:
+      - action: open_menu
+        menu_path: 编报模板分类
+
+      - component: toolbar
+        operation: click
+        target:
+          label: 新增
+
+      - component: notification
+        operation: assert
+        target:
+          type: warning
+          contains: 请选择具体分类类型
+
+  - code: toolbar-add-delete
+    name: 顶层新增并删除分类
+    description: 选择支出后新增分类，保存成功后回查列表，并按工具栏停用后删除清理
+    user: 默认用户
+    default_org: "049002"
+    steps:
+      - action: open_menu
+        menu_path: 编报模板分类
+
+      - component: tree
+        operation: select
+        target:
+          label: 支出
+
+      - component: toolbar
+        operation: click
+        target:
+          label: 新增
+
+      - component: form
+        operation: fill
+        target:
+          fields:
+            分类名称: Codex编报分类A20260430030000
+
+      - component: toolbar
+        operation: click
+        target:
+          label: 保存
+
+      - component: notification
+        operation: assert
+        target:
+          type: success
+          contains: 保存成功
+
+      - component: tree
+        operation: select
+        target:
+          label: 支出
+
+      - component: table
+        operation: assert_row_values
+        target:
+          match:
+            column: 分类名称
+            equals: Codex编报分类A20260430030000
+          fields:
+            分类名称: Codex编报分类A20260430030000
+            分类类型: 支出
+            是否启用: 是
+
+      - component: table_row_selection
+        operation: select
+        target:
+          match:
+            column: 分类名称
+            equals: Codex编报分类A20260430030000
+
+      - component: toolbar
+        operation: click
+        target:
+          label: 停用
+
+      - component: dialog
+        operation: confirm
+        target:
+          label: 确定
+
+      - component: notification
+        operation: assert
+        target:
+          type: success
+          contains: 停用成功
+
+      - component: tree
+        operation: select
+        target:
+          label: 支出
+
+      - component: table_row_selection
+        operation: select
+        target:
+          match:
+            column: 分类名称
+            equals: Codex编报分类A20260430030000
+
+      - component: toolbar
+        operation: click
+        target:
+          label: 删除
+
+      - component: dialog
+        operation: confirm
+        target:
+          label: 确定
+
+      - component: notification
+        operation: assert
+        target:
+          type: success
+          contains: 删除成功
+
+  - code: toolbar-stop-enable
+    name: 工具栏停用并启用分类
+    description: 新增分类后通过工具栏停用、启用，并验证是否启用列回写
+    user: 默认用户
+    default_org: "049002"
+    steps:
+      - action: open_menu
+        menu_path: 编报模板分类
+
+      - component: tree
+        operation: select
+        target:
+          label: 支出
+
+      - component: toolbar
+        operation: click
+        target:
+          label: 新增
+
+      - component: form
+        operation: fill
+        target:
+          fields:
+            分类名称: Codex编报分类B20260430030000
+
+      - component: toolbar
+        operation: click
+        target:
+          label: 保存
+
+      - component: notification
+        operation: assert
+        target:
+          type: success
+          contains: 保存成功
+
+      - component: tree
+        operation: select
+        target:
+          label: 支出
+
+      - component: table_row_selection
+        operation: select
+        target:
+          match:
+            column: 分类名称
+            equals: Codex编报分类B20260430030000
+
+      - component: toolbar
+        operation: click
+        target:
+          label: 停用
+
+      - component: dialog
+        operation: confirm
+        target:
+          label: 确定
+
+      - component: notification
+        operation: assert
+        target:
+          type: success
+          contains: 停用成功
+
+      - component: tree
+        operation: select
+        target:
+          label: 支出
+
+      - component: table
+        operation: assert_row_values
+        target:
+          match:
+            column: 分类名称
+            equals: Codex编报分类B20260430030000
+          fields:
+            是否启用: 否
+
+      - component: table_row_selection
+        operation: select
+        target:
+          match:
+            column: 分类名称
+            equals: Codex编报分类B20260430030000
+
+      - component: toolbar
+        operation: click
+        target:
+          label: 启用
+
+      - component: dialog
+        operation: confirm
+        target:
+          label: 确定
+
+      - component: notification
+        operation: assert
+        target:
+          type: success
+          contains: 启用成功
+
+      - component: tree
+        operation: select
+        target:
+          label: 支出
+
+      - component: table
+        operation: assert_row_values
+        target:
+          match:
+            column: 分类名称
+            equals: Codex编报分类B20260430030000
+          fields:
+            是否启用: 是
+
+      - component: table_row_selection
+        operation: select
+        target:
+          match:
+            column: 分类名称
+            equals: Codex编报分类B20260430030000
+
+      - component: toolbar
+        operation: click
+        target:
+          label: 停用
+
+      - component: dialog
+        operation: confirm
+        target:
+          label: 确定
+
+      - component: tree
+        operation: select
+        target:
+          label: 支出
+
+      - component: table_row_selection
+        operation: select
+        target:
+          match:
+            column: 分类名称
+            equals: Codex编报分类B20260430030000
+
+      - component: toolbar
+        operation: click
+        target:
+          label: 删除
+
+      - component: dialog
+        operation: confirm
+        target:
+          label: 确定
+
+  - code: row-edit
+    name: 行级编辑分类
+    description: 新增分类后点击行级编辑，修改分类名称，保存后验证列表回写并清理
+    user: 默认用户
+    default_org: "049002"
+    steps:
+      - action: open_menu
+        menu_path: 编报模板分类
+
+      - component: tree
+        operation: select
+        target:
+          label: 支出
+
+      - component: toolbar
+        operation: click
+        target:
+          label: 新增
+
+      - component: form
+        operation: fill
+        target:
+          fields:
+            分类名称: Codex编报分类C20260430030000
+
+      - component: toolbar
+        operation: click
+        target:
+          label: 保存
+
+      - component: notification
+        operation: assert
+        target:
+          type: success
+          contains: 保存成功
+
+      - component: tree
+        operation: select
+        target:
+          label: 支出
+
+      - component: table_row_action
+        operation: click
+        target:
+          action: 编辑
+          match:
+            column: 分类名称
+            equals: Codex编报分类C20260430030000
+
+      - component: form
+        operation: fill
+        target:
+          fields:
+            分类名称: Codex编报分类C改20260430030000
+
+      - component: toolbar
+        operation: click
+        target:
+          label: 保存
+
+      - component: notification
+        operation: assert
+        target:
+          type: success
+          contains: 保存成功
+
+      - component: tree
+        operation: select
+        target:
+          label: 支出
+
+      - component: table
+        operation: assert_row_values
+        target:
+          match:
+            column: 分类名称
+            equals: Codex编报分类C改20260430030000
+          fields:
+            分类名称: Codex编报分类C改20260430030000
+
+      - component: table_row_selection
+        operation: select
+        target:
+          match:
+            column: 分类名称
+            equals: Codex编报分类C改20260430030000
+
+      - component: toolbar
+        operation: click
+        target:
+          label: 停用
+
+      - component: dialog
+        operation: confirm
+        target:
+          label: 确定
+
+      - component: tree
+        operation: select
+        target:
+          label: 支出
+
+      - component: table_row_selection
+        operation: select
+        target:
+          match:
+            column: 分类名称
+            equals: Codex编报分类C改20260430030000
+
+      - component: toolbar
+        operation: click
+        target:
+          label: 删除
+
+      - component: dialog
+        operation: confirm
+        target:
+          label: 确定
+
+  - code: row-stop-enable-delete
+    name: 行级停用启用删除分类
+    description: 新增分类后使用行级停用、行级启用、行级删除，覆盖行级状态按钮和删除按钮
+    user: 默认用户
+    default_org: "049002"
+    steps:
+      - action: open_menu
+        menu_path: 编报模板分类
+
+      - component: tree
+        operation: select
+        target:
+          label: 支出
+
+      - component: toolbar
+        operation: click
+        target:
+          label: 新增
+
+      - component: form
+        operation: fill
+        target:
+          fields:
+            分类名称: Codex编报分类D20260430030000
+
+      - component: toolbar
+        operation: click
+        target:
+          label: 保存
+
+      - component: notification
+        operation: assert
+        target:
+          type: success
+          contains: 保存成功
+
+      - component: tree
+        operation: select
+        target:
+          label: 支出
+
+      - component: table_row_action
+        operation: click
+        target:
+          action: 停用
+          match:
+            column: 分类名称
+            equals: Codex编报分类D20260430030000
+
+      - component: dialog
+        operation: confirm
+        target:
+          label: 确定
+
+      - component: notification
+        operation: assert
+        target:
+          type: success
+          contains: 停用成功
+
+      - component: tree
+        operation: select
+        target:
+          label: 支出
+
+      - component: table
+        operation: assert_row_values
+        target:
+          match:
+            column: 分类名称
+            equals: Codex编报分类D20260430030000
+          fields:
+            是否启用: 否
+
+      - component: table_row_action
+        operation: click
+        target:
+          action: 启用
+          match:
+            column: 分类名称
+            equals: Codex编报分类D20260430030000
+
+      - component: dialog
+        operation: confirm
+        target:
+          label: 确定
+
+      - component: notification
+        operation: assert
+        target:
+          type: success
+          contains: 启用成功
+
+      - component: tree
+        operation: select
+        target:
+          label: 支出
+
+      - component: table_row_action
+        operation: click
+        target:
+          action: 停用
+          match:
+            column: 分类名称
+            equals: Codex编报分类D20260430030000
+
+      - component: dialog
+        operation: confirm
+        target:
+          label: 确定
+
+      - component: tree
+        operation: select
+        target:
+          label: 支出
+
+      - component: table_row_action
+        operation: click
+        target:
+          action: 删除
+          match:
+            column: 分类名称
+            equals: Codex编报分类D20260430030000
+
+      - component: dialog
+        operation: confirm
+        target:
+          label: 确定
+
+      - component: notification
+        operation: assert
+        target:
+          type: success
+          contains: 删除成功
+
+  - code: row-add-child
+    name: 行级新增下级分类
+    description: 新增父分类后点击行级新增下级，保存子分类，查询验证后按子分类、父分类顺序清理
+    user: 默认用户
+    default_org: "049002"
+    steps:
+      - action: open_menu
+        menu_path: 编报模板分类
+
+      - component: tree
+        operation: select
+        target:
+          label: 支出
+
+      - component: toolbar
+        operation: click
+        target:
+          label: 新增
+
+      - component: form
+        operation: fill
+        target:
+          fields:
+            分类名称: Codex编报分类E父202605010001
+
+      - component: toolbar
+        operation: click
+        target:
+          label: 保存
+
+      - component: notification
+        operation: assert
+        target:
+          type: success
+          contains: 保存成功
+
+      - component: tree
+        operation: select
+        target:
+          label: 支出
+
+      - component: table_row_action
+        operation: click
+        target:
+          action: 新增下级
+          match:
+            column: 分类名称
+            equals: Codex编报分类E父202605010001
+
+      - component: form
+        operation: fill
+        target:
+          fields:
+            分类名称: Codex编报分类E子202605010001
+
+      - component: toolbar
+        operation: click
+        target:
+          label: 保存
+
+      - component: notification
+        operation: assert
+        target:
+          type: success
+          contains: 保存成功
+
+      - component: tree
+        operation: select
+        target:
+          label: 支出
+
+      - component: query
+        operation: search
+        target:
+          conditions:
+            - field: 分类名称
+              equals: Codex编报分类E子202605010001
+
+      - component: table
+        operation: assert_row_values
+        target:
+          match:
+            column: 分类名称
+            equals: Codex编报分类E子202605010001
+          fields:
+            分类名称: Codex编报分类E子202605010001
+            分类类型: 支出
+            是否启用: 是
+
+      - component: table_row_selection
+        operation: select
+        target:
+          match:
+            column: 分类名称
+            equals: Codex编报分类E子202605010001
+
+      - component: toolbar
+        operation: click
+        target:
+          label: 停用
+
+      - component: dialog
+        operation: confirm
+        target:
+          label: 确定
+
+      - component: notification
+        operation: assert
+        target:
+          type: success
+          contains: 停用成功
+
+      - component: query
+        operation: search
+        target:
+          conditions:
+            - field: 分类名称
+              equals: Codex编报分类E子202605010001
+
+      - component: table_row_selection
+        operation: select
+        target:
+          match:
+            column: 分类名称
+            equals: Codex编报分类E子202605010001
+
+      - component: toolbar
+        operation: click
+        target:
+          label: 删除
+
+      - component: dialog
+        operation: confirm
+        target:
+          label: 确定
+
+      - component: notification
+        operation: assert
+        target:
+          type: success
+          contains: 删除成功
+
+      - component: query
+        operation: search
+        target:
+          conditions:
+            - field: 分类名称
+              equals: Codex编报分类E父202605010001
+
+      - component: table
+        operation: assert_row_values
+        target:
+          match:
+            column: 分类名称
+            equals: Codex编报分类E父202605010001
+          fields:
+            分类名称: Codex编报分类E父202605010001
+            分类类型: 支出
+            是否启用: 是
+
+      - component: table_row_selection
+        operation: select
+        target:
+          match:
+            column: 分类名称
+            equals: Codex编报分类E父202605010001
+
+      - component: toolbar
+        operation: click
+        target:
+          label: 停用
+
+      - component: dialog
+        operation: confirm
+        target:
+          label: 确定
+
+      - component: notification
+        operation: assert
+        target:
+          type: success
+          contains: 停用成功
+
+      - component: query
+        operation: search
+        target:
+          conditions:
+            - field: 分类名称
+              equals: Codex编报分类E父202605010001
+
+      - component: table_row_selection
+        operation: select
+        target:
+          match:
+            column: 分类名称
+            equals: Codex编报分类E父202605010001
+
+      - component: toolbar
+        operation: click
+        target:
+          label: 删除
+
+      - component: dialog
+        operation: confirm
+        target:
+          label: 确定
+
+      - component: notification
+        operation: assert
+        target:
+          type: success
+          contains: 删除成功

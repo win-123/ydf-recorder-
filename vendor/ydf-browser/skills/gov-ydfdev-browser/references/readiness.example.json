@@ -1,0 +1,21 @@
+{
+  "readiness": [
+    {
+      "target": "frontend-webpack",
+      "mode": "http_reachable",
+      "url": "https://127.0.0.1:3006/",
+      "timeout_seconds": 15,
+      "tls_verify": false
+    },
+    {
+      "target": "yms-backend",
+      "mode": "semantic_probe",
+      "url": "http://127.0.0.1:62871/_yms/ready",
+      "timeout_seconds": 120,
+      "tls_verify": true,
+      "expected_status": 200,
+      "json_path": "$.ready",
+      "equals": true
+    }
+  ]
+}

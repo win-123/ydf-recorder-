@@ -1,0 +1,162 @@
+# 真实回归：工作流面板撤回审批。
+# 原问题：toolbar.click「销审」仅打开右侧面板，原用例在兼容超时后通过，未执行撤回。
+# 根因：工作流组件不属于单据模板；操作入口是单选式控件，且会再打开标准确认弹窗。
+# 修复：显式 workflow_panel.click，随后 dialog.confirm；按捕获的单据编号回查已审核列表为空。
+# 安全边界：只操作前景面板动作区的唯一精确文本；禁用、遮挡、歧义或缺少完成信号均失败。
+# 数据影响：第三个用例撤回当前查询结果第一行的审批；先捕获其编号并全程保持同一身份。
+# 数据不足时，按顺序执行前两个用例创建并审核一条入库单；不自动删除业务单据。
+# 环境需配置所引用的用户别名、租户和默认组织；不包含登录凭据。
+# run: ./.venv/bin/python -m ydf_browser.cli run --dsl tests/real_cases/material_stockin_workflow_panel_withdraw.yaml --env t53 --case 'reverse process of consumables stock-in cancel audit' --headless
+
+suite:
+  code: swgl-yhpwz-yhprklc-nx-0007
+  name: 易耗品入库逆向流程
+  tenant: 高校科研
+  default_org: '101001'
+cases:
+- code: reverse process of consumables stock-in fill
+  name: 易耗品入库逆向流程
+  description: 直接入库填报并提交（为销审准备单据）
+  user: '15001365881'
+  steps:
+  - action: open_menu
+    menu_path: 易耗品物资 >> 入库登记 >> 入库填报
+  - component: tab
+    operation: click
+    target:
+      label: 待提交
+  - component: toolbar
+    operation: click
+    target:
+      label: 新增
+  - component: form
+    operation: fill
+    target:
+      fields:
+        来源方式: 采购
+        备注: A3复印纸{{random.suffix}}
+  - component: editable_table
+    operation: add_row
+    target:
+      label: 新增
+      table: 物资入库
+  - component: editable_table
+    operation: fill_row
+    target:
+      table: 物资入库
+      row_number: -1
+      fields:
+        物资分类:
+          tree:
+            label: A05040101 复印纸
+          match:
+            column: 规格型号
+            equals: A3
+        存放仓库: 北京总仓
+        入库数量: '2222'
+  - component: toolbar
+    operation: click
+    target:
+      label: 保存并提交
+  - component: notification
+    operation: assert
+    target:
+      type: success
+      contains: 保存成功
+  - component: tab
+    operation: click
+    target:
+      label: 已提交
+- code: reverse process of consumables stock-in audit
+  name: 易耗品入库逆向流程
+  description: 入库审核通过后再销审（逆向流程）
+  user: '15001365881'
+  steps:
+  - action: open_menu
+    menu_path: 易耗品物资 >> 入库登记 >> 入库审核
+  - component: tab
+    operation: click
+    target:
+      label: 待审核
+  - component: query
+    operation: search
+    target:
+      conditions:
+      - field: 总数量
+        equals: '2222'
+  - component: table_row_selection
+    operation: select
+    target:
+      row_numbers:
+      - 1
+  - component: toolbar
+    operation: click
+    target:
+      label: 通过
+  - component: dialog
+    operation: confirm
+    target:
+      label: 确认
+  - component: notification
+    operation: assert
+    target:
+      type: success
+      contains: 成功
+- code: reverse process of consumables stock-in cancel audit
+  name: 易耗品入库逆向流程
+  description: 已审核单据销审（撤回审批）
+  user: '15001365881'
+  steps:
+  - action: open_menu
+    menu_path: 易耗品物资 >> 入库登记 >> 入库审核
+  - component: tab
+    operation: click
+    target:
+      label: 已审核
+  - component: query
+    operation: search
+    target:
+      conditions:
+      - field: 总数量
+        equals: '2222'
+  - component: table
+    operation: capture_row_values
+    target:
+      match:
+        column: 序号
+        equals: '1'
+      capture:
+        workflow.bill_code: 单据编码
+  - component: table_row_selection
+    operation: select
+    target:
+      match:
+        column: 单据编码
+        equals: '{{workflow.bill_code}}'
+  - component: table
+    operation: assert_column_values
+    target:
+      column: 单据状态
+      equals: 审批完成
+  - component: toolbar
+    operation: click
+    target:
+      label: 销审
+  - component: workflow_panel
+    operation: click
+    target:
+      label: 撤回审批
+  - component: dialog
+    operation: confirm
+    target:
+      label: 确定
+  - component: query
+    operation: search
+    target:
+      conditions:
+      - field: 单据编号
+        equals: '{{workflow.bill_code}}'
+  - component: table
+    operation: assert_empty
+    target:
+      column: 单据编码

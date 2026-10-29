@@ -1,0 +1,49 @@
+suite:
+  code: payment_contract_registration_tabs
+  name: 付款合同登记页签
+  description: 付款合同登记顶部整行胶囊页签切换
+  tenant: 财政一体化
+cases:
+  - code: switch-status-tabs
+    name: 切换付款合同登记状态页签
+    description: 依次点击草稿、待提交、已提交、审核中、已终审、已备案和全部页签
+    user: 默认用户
+    default_org: "049002"
+    steps:
+      - action: open_menu
+        menu_path: 合同管理>>付款合同>>付款合同登记
+
+      - component: tab
+        operation: click
+        target:
+          label: 草稿
+
+      - component: tab
+        operation: click
+        target:
+          label: 待提交
+
+      - component: tab
+        operation: click
+        target:
+          label: 已提交
+
+      - component: tab
+        operation: click
+        target:
+          label: 审核中
+
+      - component: tab
+        operation: click
+        target:
+          label: 已终审
+
+      - component: tab
+        operation: click
+        target:
+          label: 已备案
+
+      - component: tab
+        operation: click
+        target:
+          label: 全部

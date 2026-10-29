@@ -106,22 +106,28 @@ class TestDiscoverCommand(unittest.TestCase):
             self.assertEqual(result.source, "runtime-venv")
 
     def test_path_fallback(self):
-        result = discover_command(
-            env={},
-            which_fn=lambda name: f"/found/{name}" if name == "ydf-browser" else None,
-            importable_fn=lambda _: False,
-        )
-        self.assertEqual(result.command, ["/found/ydf-browser"])
-        self.assertEqual(result.source, "PATH")
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            result = discover_command(
+                root=Path(tmp),
+                env={},
+                which_fn=lambda name: f"/found/{name}" if name == "ydf-browser" else None,
+                importable_fn=lambda _: False,
+            )
+            self.assertEqual(result.command, ["/found/ydf-browser"])
+            self.assertEqual(result.source, "PATH")
 
     def test_interpreter_fallback(self):
-        result = discover_command(
-            env={},
-            which_fn=lambda _: None,
-            importable_fn=lambda name: name == "ydf_browser",
-        )
-        self.assertEqual(result.source, "interpreter")
-        self.assertIn("-m", result.command or [])
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            result = discover_command(
+                root=Path(tmp),
+                env={},
+                which_fn=lambda _: None,
+                importable_fn=lambda name: name == "ydf_browser",
+            )
+            self.assertEqual(result.source, "interpreter")
+            self.assertIn("-m", result.command or [])
 
     def test_not_found_hint_mentions_source_dir(self):
         import tempfile
@@ -180,7 +186,7 @@ class TestDefaultConfigPath(unittest.TestCase):
 class TestBuildArgs(unittest.TestCase):
     def test_run_args_minimal(self):
         args = build_run_args(ReplayOptions(yaml_path="suite.yaml"))
-        self.assertEqual(args, ["run", "suite.yaml", "--env", "ydf"])
+        self.assertEqual(args, ["run", "--dsl", "suite.yaml", "--env", "ydf"])
 
     def test_run_args_full(self):
         opts = ReplayOptions(

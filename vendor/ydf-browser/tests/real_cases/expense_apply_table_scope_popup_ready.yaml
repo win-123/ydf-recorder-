@@ -1,0 +1,81 @@
+# 来源：经费申请单中操作费用明细时指标信息横向滚动，选择指标加载后仍等待兼容超时。
+# 作用域回归：新增、录入、表头读取、行选择和值断言消费同一表格身份；不退回按名称另找根。
+# 最小路径：新增表单 → 费用增行/填行 → 选择指标；不保存、不提交。
+# 回归判据：费用步骤不滚动 table1es_table；选择指标按钮应报告
+# completion_signal=popup_reference_ready、fallback_used=false；费用值正确且指标回填非空。
+# 瞬时滚动及加载反例由 tests/test_runtime.py 对应浏览器回归锁定，单凭 DSL 成功不足以证明性能修复。
+# 环境前提：当前用户可新增经费申请单，并有至少一条可选指标；缺少指标时应失败，不换业务数据。
+# run: ./.venv/bin/python -m ydf_browser.cli run --dsl tests/real_cases/expense_apply_table_scope_popup_ready.yaml --headless
+suite:
+  code: expense_apply_table_scope_popup_ready
+  name: 经费申请单表格探测与参照就绪回归
+  tenant: 财政一体化
+  default_org: 江西省局本级（主管单位/单位经办）
+cases:
+  - code: expense-apply-table-popup
+    name: 费用明细录入后选择指标
+    user: 13916730164
+    steps:
+      - action: open_menu
+        menu_path: 事前申请>>申请办理>>申请单填报
+      - component: toolbar
+        operation: click
+        target:
+          label: 新增
+          sub_label: 经费申请单
+      - component: form
+        operation: fill
+        target:
+          fields:
+            申请事由: 经费申请单表格与参照回归
+      - component: editable_table
+        operation: add_row
+        target:
+          table: 费用明细
+          label: 新增
+      - component: editable_table
+        operation: fill_row
+        target:
+          table: 费用明细
+          row_number: -1
+          fields:
+            费用名称: 办公费
+            金额: "10"
+      - component: table
+        operation: assert_columns
+        target:
+          table: 费用明细
+          present: [费用名称, 金额]
+      - component: table_row_selection
+        operation: select
+        target:
+          table: 费用明细
+          row_numbers: [1]
+      - component: table
+        operation: assert_row_values
+        target:
+          table: 费用明细
+          match:
+            column: 费用名称
+            equals: 办公费
+          fields:
+            金额: "10.00"
+      - component: toolbar
+        operation: click
+        target:
+          label: 选择指标
+      - component: popup_reference
+        operation: select
+        target:
+          title: 选择指标
+          first_available: true
+          confirm: true
+      - component: table
+        operation: capture_row_values
+        target:
+          table: 指标信息
+          match:
+            column: 序号
+            equals: "1"
+          capture:
+            regression.selected_project: 项目

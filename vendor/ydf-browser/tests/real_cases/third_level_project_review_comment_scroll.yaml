@@ -1,0 +1,47 @@
+# 来源：二上三级项目细化第 5 步填写“评审内容及意见”失败。
+# 原错误：表单字段[评审内容及意见]的平台精确身份状态不兼容。
+# 根因：文本域完全位于内部滚动区域下方，但仍与窗口相交，pointer 命中落到固定底部工具栏。
+# 修复：共享 DOM 扫描纳入可滚动祖先内容边界，唯一精确身份按未知 pointer 状态绑定后滚动录入。
+# 安全边界：真实遮挡、禁用、只读、背景和多输入歧义仍失败；本用例不保存、不提交。
+# 完善：裁剪按实际定位包含块和缩放坐标计算；不可恢复的内层裁剪拒绝录入，滚动后的真实点击失败不得强制写值。
+# 前置条件：目标环境具有“自动化内控”租户及“三级项目名称2”未细化记录；用户别名需在本机环境配置中存在。
+# 预期：不需要人工滚动，字段录入 confirmed，后续 form.assert_values 通过。
+# run: ./.venv/bin/python -m ydf_browser.cli run --dsl tests/real_cases/third_level_project_review_comment_scroll.yaml --env t221 --headless --window-size 1707x825
+suite:
+  code: real-regression-third-level-project-review-comment-scroll
+  name: 二上三级项目细化-内部滚动文本域真实回归
+  tenant: 自动化内控
+  default_org: "255001"
+cases:
+  - code: review-comment-scroll
+    name: 自动滚动后填写并断言评审内容及意见
+    user: 15500100142
+    steps:
+      - action: open_menu
+        menu_path: 预算编制>>部门预算编制>>二上预算编制>>二上三级项目细化
+      - component: query
+        operation: search
+        target:
+          conditions:
+            - field: 项目名称
+              equals: 三级项目名称2
+      - component: table_row_selection
+        operation: select
+        target:
+          match:
+            column: 项目状态
+            equals: 未细化
+      - component: toolbar
+        operation: click
+        target:
+          label: 细化
+      - component: form
+        operation: fill
+        target:
+          fields:
+            评审内容及意见: AI自动化测试评审内容及意见，AI自动化测试评审内容及意见，AI自动化测试评审内容及意见
+      - component: form
+        operation: assert_values
+        target:
+          fields:
+            评审内容及意见: AI自动化测试评审内容及意见，AI自动化测试评审内容及意见，AI自动化测试评审内容及意见

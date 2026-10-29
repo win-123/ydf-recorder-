@@ -1,0 +1,24 @@
+suite:
+  code: project_suggest_tabs
+  name: 项目建议页签
+  description: 验证项目建议页面 toolbar type=tab 页签可点击
+  tenant: 财政一体化
+cases:
+  - code: click-tabs
+    name: 点击待提交和全部页签
+    description: 打开项目建议后点击待提交，再切回全部
+    user: 默认用户
+    default_org: "049002"
+    steps:
+      - action: open_menu
+        menu_path: 项目库>>项目建议>>项目建议
+
+      - component: tab
+        operation: click
+        target:
+          label: 待提交
+
+      - component: tab
+        operation: click
+        target:
+          label: 全部

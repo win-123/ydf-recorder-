@@ -1,0 +1,31 @@
+# Bug 现象：账户状态的关闭态搜索框带 readonly，精确身份下多个容器无法折叠，
+# query.search 降级后将“草稿”填入 label，触发 Locator.fill 类型错误。
+# 回归：下拉绑定到唯一且可操作的身份根，默认“启用”被精确替换为“草稿”；
+# 查询报告须包含 expected_values/actual_values=[草稿]，结果表的账户状态全部为草稿。
+# 前置条件：所选组织存在草稿账户；缺少数据应按数据问题处理。
+# 仅查询，不保存、不提交，不改变账户数据。
+
+suite:
+  code: real-regression-fiscal-account-status-query-select
+  name: 财政账户状态下拉查询真实回归
+  tenant: wq测试1
+  default_org: "255102003"
+cases:
+  - code: fiscal-account-status-query-select
+    name: 只读搜索框的下拉状态从启用切换为草稿
+    user: "15500500501"
+    tags: [regression]
+    steps:
+      - action: open_menu
+        menu_path: 账户管理>>财政基础信息>>财政账户信息库
+      - component: query
+        operation: search
+        target:
+          conditions:
+            - field: 账户状态
+              equals: 草稿
+      - component: table
+        operation: assert_column_values
+        target:
+          column: 账户状态
+          equals: 草稿

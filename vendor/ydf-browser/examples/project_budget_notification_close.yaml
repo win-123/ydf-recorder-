@@ -1,0 +1,35 @@
+suite:
+  code: project_budget_notification_close
+  name: 项目预算错误提示关闭示例
+  description: 验证预期错误提示断言后显式关闭，再继续执行后续业务动作
+  tenant: 财政一体化
+  default_org: "101001"
+cases:
+  - code: close-expected-budget-adjust-error
+    name: 预算调整错误提示关闭后继续选择项目预算
+    user: 默认用户
+    steps:
+      - action: open_menu
+        menu_path: 项目预算>>财务服务>>项目预算管理-业务
+
+      - component: toolbar
+        operation: click
+        target:
+          label: 预算调整
+
+      - component: notification
+        operation: assert
+        target:
+          type: error
+          contains: 请联系管理员
+
+      - component: notification
+        operation: close
+        target:
+          type: error
+          contains: 请联系管理员
+
+      - component: toolbar
+        operation: click
+        target:
+          label: 选择项目预算

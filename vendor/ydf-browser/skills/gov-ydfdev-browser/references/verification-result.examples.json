@@ -1,0 +1,30 @@
+[
+  {
+    "status": "verified",
+    "reason_code": "all_gates_passed",
+    "business_assertions_passed": true,
+    "runs": [
+      {"phase": "red", "qualified": true, "dsl_sha256": "0000000000000000000000000000000000000000000000000000000000000000", "run_dir": "runs/red-1", "tool_outcome": "assertion_failed", "report": "runs/red-1/report.json", "assertion_receipt": {"expected": "AI-R"}, "request_id": "request-000003", "flow_request_ids": {"precondition": "request-000001", "mutation": "request-000002", "postcondition": "request-000003"}, "api_business_id": "AI-R", "ui_business_id": "AI-R", "local_forward_hit": true},
+      {"phase": "green", "qualified": true, "dsl_sha256": "0000000000000000000000000000000000000000000000000000000000000000", "run_dir": "runs/green-1", "tool_outcome": "passed", "report": "runs/green-1/report.json", "assertion_receipt": {"expected": "AI-G1"}, "request_id": "request-000006", "flow_request_ids": {"precondition": "request-000004", "mutation": "request-000005", "postcondition": "request-000006"}, "api_business_id": "AI-G1", "ui_business_id": "AI-G1", "local_forward_hit": true},
+      {"phase": "green", "qualified": true, "dsl_sha256": "0000000000000000000000000000000000000000000000000000000000000000", "run_dir": "runs/green-2", "tool_outcome": "passed", "report": "runs/green-2/report.json", "assertion_receipt": {"expected": "AI-G2"}, "request_id": "request-000009", "flow_request_ids": {"precondition": "request-000007", "mutation": "request-000008", "postcondition": "request-000009"}, "api_business_id": "AI-G2", "ui_business_id": "AI-G2", "local_forward_hit": true}
+    ],
+    "cleanup": {"success": true, "identifiers": ["AI-R", "AI-G1", "AI-G2"], "last_known_state": "removed"},
+    "fingerprints": {"verified": true, "before": {}, "after": {}}
+  },
+  {
+    "status": "not_verified",
+    "reason_code": "cleanup_failed",
+    "business_assertions_passed": true,
+    "runs": [],
+    "cleanup": {"success": false, "identifiers": ["AI-G2"], "last_known_state": "still_present_after_retry"},
+    "fingerprints": {"verified": true, "before": {}, "after": {}}
+  },
+  {
+    "status": "invalid",
+    "reason_code": "fingerprint_changed",
+    "business_assertions_passed": false,
+    "runs": [],
+    "cleanup": {"success": false, "identifiers": [], "last_known_state": "not_run"},
+    "fingerprints": {"verified": false, "before": {}, "after": {}}
+  }
+]

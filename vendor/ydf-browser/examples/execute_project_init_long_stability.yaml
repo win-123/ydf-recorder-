@@ -1,0 +1,466 @@
+suite:
+  code: execute_project_init
+  name: 执行项目立项
+  description: 覆盖已验证按钮的长稳定性测试集
+  tenant: 财政一体化
+cases:
+  - code: long-stability
+    name: 执行项目立项长稳定性
+    description: 覆盖新增取消、保存、保存并新增、复制新增、导出、项目导出、启停、删除和清理
+    user: 默认用户
+    default_org: "049002"
+    steps:
+      - action: open_menu
+        menu_path: 项目库>>执行项目管理>>执行项目立项
+    
+      # 1. 新增页取消：触发确认框并确认返回列表
+      - component: toolbar
+        operation: click
+        target:
+          label: 新增
+      - component: form
+        operation: fill
+        target:
+          fields:
+            项目名称: Codex长稳取消20260427020349
+      - component: toolbar
+        operation: click
+        target:
+          label: 取消
+      - component: dialog
+        operation: confirm
+        target:
+          label: 确定
+          restore_previous: true
+      # 2. 新增并保存 A，用于后续复制新增、项目导出、启停
+      - component: toolbar
+        operation: click
+        target:
+          label: 新增
+      - component: form
+        operation: fill
+        target:
+          fields:
+            项目申报部门: 099 老干部处
+            执行项目分类: 909 11133+2026
+            项目名称: Codex长稳A20260427020349
+            预算模版: 0320 0320预算模板
+            项目开始时间: "2026-05-01"
+            项目结束时间: "2026-12-31"
+            项目负责人: 049004测试新增
+            基建项目类型: 2 财政安排的基建项目
+            项目总额: "10000"
+            项目概述: Codex长稳概述A20260427020349
+      - component: toolbar
+        operation: click
+        target:
+          label: 保存
+      - component: query
+        operation: search
+        target:
+          conditions:
+            - field: 项目名称
+              equals: Codex长稳A20260427020349
+      - component: table
+        operation: assert_column_values
+        target:
+          column: 项目名称
+          equals: Codex长稳A20260427020349
+    
+      - action: open_menu
+        menu_path: 项目库>>执行项目管理>>执行项目立项
+    
+      # 3. 新增并保存并新增 B，随后返回列表并验证
+      - component: toolbar
+        operation: click
+        target:
+          label: 新增
+      - component: form
+        operation: fill
+        target:
+          fields:
+            项目申报部门: 099 老干部处
+            执行项目分类: 909 11133+2026
+            项目名称: Codex长稳B20260427020349
+            预算模版: 0320 0320预算模板
+            项目开始时间: "2026-05-01"
+            项目结束时间: "2026-12-31"
+            项目负责人: 049004测试新增
+            基建项目类型: 2 财政安排的基建项目
+            项目总额: "10000"
+            项目概述: Codex长稳概述B20260427020349
+      - component: toolbar
+        operation: click
+        target:
+          label: 保存并新增
+      - component: action
+        operation: click
+        target:
+          fieldid: pageHeader_return
+      - component: query
+        operation: search
+        target:
+          conditions:
+            - field: 项目名称
+              equals: Codex长稳B20260427020349
+      - component: table
+        operation: assert_column_values
+        target:
+          column: 项目名称
+          equals: Codex长稳B20260427020349
+    
+      - action: open_menu
+        menu_path: 项目库>>执行项目管理>>执行项目立项
+    
+      # 4. 复制新增 A：进入模板，修改概述，保存时报已知业务错误
+      - component: query
+        operation: search
+        target:
+          conditions:
+            - field: 项目名称
+              equals: Codex长稳A20260427020349
+      - component: table
+        operation: assert_column_values
+        target:
+          column: 项目名称
+          equals: Codex长稳A20260427020349
+      - component: table_row_selection
+        operation: select
+        target:
+          match:
+            column: 项目名称
+            equals: Codex长稳A20260427020349
+      - component: toolbar
+        operation: click
+        target:
+          label: 复制新增
+      - component: form
+        operation: fill
+        target:
+          fields:
+            项目概述: Codex长稳复制概述20260427020349
+      - component: toolbar
+        operation: click
+        target:
+          label: 保存
+      - component: action
+        operation: click
+        target:
+          fieldid: pageHeader_return
+    
+      - action: open_menu
+        menu_path: 项目库>>执行项目管理>>执行项目立项
+    
+      # 5. 普通导出 A
+      - component: query
+        operation: search
+        target:
+          conditions:
+            - field: 项目名称
+              equals: Codex长稳A20260427020349
+      - component: table_row_selection
+        operation: select
+        target:
+          match:
+            column: 项目名称
+            equals: Codex长稳A20260427020349
+      - component: toolbar
+        operation: click
+        target:
+          label: 导出
+    
+      - action: open_menu
+        menu_path: 项目库>>执行项目管理>>执行项目立项
+    
+      # 6. 项目导出 A：弹出选项模板后默认确认下载
+      - component: query
+        operation: search
+        target:
+          conditions:
+            - field: 项目名称
+              equals: Codex长稳A20260427020349
+      - component: table_row_selection
+        operation: select
+        target:
+          match:
+            column: 项目名称
+            equals: Codex长稳A20260427020349
+      - component: toolbar
+        operation: click
+        target:
+          label: 项目导出
+      - component: dialog
+        operation: confirm
+        target:
+          label: 确认
+          expect_download: true
+    
+      - action: open_menu
+        menu_path: 项目库>>执行项目管理>>执行项目立项
+    
+      # 7. 行级停用/启用 A，并验证是否启用列
+      - component: query
+        operation: search
+        target:
+          conditions:
+            - field: 项目名称
+              equals: Codex长稳A20260427020349
+      - component: table_row_action
+        operation: click
+        target:
+          action: 停用
+          match:
+            column: 项目名称
+            equals: Codex长稳A20260427020349
+      - component: query
+        operation: search
+        target:
+          conditions:
+            - field: 项目名称
+              equals: Codex长稳A20260427020349
+      - component: table
+        operation: assert_column_values
+        target:
+          column: 是否启用
+          equals: 否
+      - component: table_row_action
+        operation: click
+        target:
+          action: 启用
+          match:
+            column: 项目名称
+            equals: Codex长稳A20260427020349
+      - component: query
+        operation: search
+        target:
+          conditions:
+            - field: 项目名称
+              equals: Codex长稳A20260427020349
+      - component: table
+        operation: assert_column_values
+        target:
+          column: 是否启用
+          equals: 是
+    
+      - action: open_menu
+        menu_path: 项目库>>执行项目管理>>执行项目立项
+    
+      # 8. 工具栏停用/启用 A，并验证是否启用列
+      - component: table_row_selection
+        operation: select
+        target:
+          match:
+            column: 项目名称
+            equals: Codex长稳A20260427020349
+      - component: toolbar
+        operation: click
+        target:
+          label: 停用
+      - component: query
+        operation: search
+        target:
+          conditions:
+            - field: 项目名称
+              equals: Codex长稳A20260427020349
+      - component: table
+        operation: assert_column_values
+        target:
+          column: 是否启用
+          equals: 否
+      - component: table_row_selection
+        operation: select
+        target:
+          match:
+            column: 项目名称
+            equals: Codex长稳A20260427020349
+      - component: toolbar
+        operation: click
+        target:
+          label: 启用
+      - component: query
+        operation: search
+        target:
+          conditions:
+            - field: 项目名称
+              equals: Codex长稳A20260427020349
+      - component: table
+        operation: assert_column_values
+        target:
+          column: 是否启用
+          equals: 是
+    
+      - action: open_menu
+        menu_path: 项目库>>执行项目管理>>执行项目立项
+    
+      # 9. 创建 C 后行级删除，并验证为空
+      - component: toolbar
+        operation: click
+        target:
+          label: 新增
+      - component: form
+        operation: fill
+        target:
+          fields:
+            项目申报部门: 099 老干部处
+            执行项目分类: 909 11133+2026
+            项目名称: Codex长稳C20260427020349
+            预算模版: 0320 0320预算模板
+            项目开始时间: "2026-05-01"
+            项目结束时间: "2026-12-31"
+            项目负责人: 049004测试新增
+            基建项目类型: 2 财政安排的基建项目
+            项目总额: "10000"
+            项目概述: Codex长稳C20260427020349概述
+      - component: toolbar
+        operation: click
+        target:
+          label: 保存
+      - component: query
+        operation: search
+        target:
+          conditions:
+            - field: 项目名称
+              equals: Codex长稳C20260427020349
+      - component: table_row_action
+        operation: click
+        target:
+          action: 删除
+          match:
+            column: 项目名称
+            equals: Codex长稳C20260427020349
+      - component: dialog
+        operation: confirm
+        target:
+          label: 确定
+      - component: query
+        operation: search
+        target:
+          conditions:
+            - field: 项目名称
+              equals: Codex长稳C20260427020349
+      - component: table
+        operation: assert_empty
+        target:
+          column: 项目名称
+    
+      - action: open_menu
+        menu_path: 项目库>>执行项目管理>>执行项目立项
+    
+      # 10. 创建 D 后工具栏删除，并验证为空
+      - component: toolbar
+        operation: click
+        target:
+          label: 新增
+      - component: form
+        operation: fill
+        target:
+          fields:
+            项目申报部门: 099 老干部处
+            执行项目分类: 909 11133+2026
+            项目名称: Codex长稳D20260427020349
+            预算模版: 0320 0320预算模板
+            项目开始时间: "2026-05-01"
+            项目结束时间: "2026-12-31"
+            项目负责人: 049004测试新增
+            基建项目类型: 2 财政安排的基建项目
+            项目总额: "10000"
+            项目概述: Codex长稳D20260427020349概述
+      - component: toolbar
+        operation: click
+        target:
+          label: 保存
+      - component: query
+        operation: search
+        target:
+          conditions:
+            - field: 项目名称
+              equals: Codex长稳D20260427020349
+      - component: table_row_selection
+        operation: select
+        target:
+          match:
+            column: 项目名称
+            equals: Codex长稳D20260427020349
+      - component: toolbar
+        operation: click
+        target:
+          label: 删除
+      - component: dialog
+        operation: confirm
+        target:
+          label: 确定
+      - component: query
+        operation: search
+        target:
+          conditions:
+            - field: 项目名称
+              equals: Codex长稳D20260427020349
+      - component: table
+        operation: assert_empty
+        target:
+          column: 项目名称
+    
+      - action: open_menu
+        menu_path: 项目库>>执行项目管理>>执行项目立项
+    
+      # 11. 清理 A/B
+      - component: query
+        operation: search
+        target:
+          conditions:
+            - field: 项目名称
+              equals: Codex长稳A20260427020349
+      - component: table_row_selection
+        operation: select
+        target:
+          match:
+            column: 项目名称
+            equals: Codex长稳A20260427020349
+      - component: toolbar
+        operation: click
+        target:
+          label: 删除
+      - component: dialog
+        operation: confirm
+        target:
+          label: 确定
+      - component: query
+        operation: search
+        target:
+          conditions:
+            - field: 项目名称
+              equals: Codex长稳A20260427020349
+      - component: table
+        operation: assert_empty
+        target:
+          column: 项目名称
+      - component: query
+        operation: search
+        target:
+          conditions:
+            - field: 项目名称
+              equals: Codex长稳B20260427020349
+      - component: table_row_selection
+        operation: select
+        target:
+          match:
+            column: 项目名称
+            equals: Codex长稳B20260427020349
+      - component: toolbar
+        operation: click
+        target:
+          label: 删除
+      - component: dialog
+        operation: confirm
+        target:
+          label: 确定
+      - component: query
+        operation: search
+        target:
+          conditions:
+            - field: 项目名称
+              equals: Codex长稳B20260427020349
+      - component: table
+        operation: assert_empty
+        target:
+          column: 项目名称

@@ -1,0 +1,37 @@
+# 症状：新增经费申请单后，费用明细新增报“表格名称未匹配”，候选仍为列表页 tableContainer。
+# 根因：动态模板就绪检查只提取数字 divCode，遗漏实际字段 BasicDiv_reason；标签兜底又命中重复节点。
+# 修复：复用现有模板解析器生成的字段身份，继续用运行时证据判断工作面就绪。
+# 边界：字段缺失、配置隐藏或工作面不唯一时不得仅凭候选身份采用模板。
+# 基线：财政一体化，江西省局本级（主管单位/单位经办），申请单填报 > 新增 > 经费申请单。
+# 预期：form.fill 应用新增模板且申请事由 confirmed=true；明细定位 DETAIL_table，有效行数 0 -> 1。
+# 最小链路：保留 form.fill，覆盖工具栏动态模板延迟到表单动作采用的既有策略。
+# 数据影响：仅录入未保存表单并新增空明细行，不保存、不提交。
+# run: ./.venv/bin/python -m ydf_browser.cli run --dsl tests/real_cases/apply_bill_dynamic_template_field_identity.yaml --headless
+suite:
+  code: apply-bill-dynamic-template-field-identity
+  name: 经费申请单-动态模板字段身份真实回归
+  tenant: 财政一体化
+  default_org: 江西省局本级（主管单位/单位经办）
+cases:
+  - code: add-expense-row-after-form
+    name: 新增模板就绪后定位费用明细
+    user: 13916730164
+    tags: [regression]
+    steps:
+      - action: open_menu
+        menu_path: 事前申请>>申请办理>>申请单填报
+      - component: toolbar
+        operation: click
+        target:
+          label: 新增
+          sub_label: 经费申请单
+      - component: form
+        operation: fill
+        target:
+          fields:
+            申请事由: 【自动化】【ydf-browser】经费申请单模板回归
+      - component: editable_table
+        operation: add_row
+        target:
+          table: 费用明细
+          label: 新增

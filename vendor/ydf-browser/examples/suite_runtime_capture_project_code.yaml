@@ -1,0 +1,88 @@
+suite:
+  code: suite-runtime-capture-project-code
+  name: 新增后捕获项目代码并跨用例使用
+  tenant: 财政一体化
+  default_org: "049002"
+
+cases:
+  - code: create-and-capture
+    name: 新增保存后捕获项目代码
+    user: 默认用户
+    steps:
+      - action: open_menu
+        menu_path: 项目库>>一级项目>>一级项目管理（财政）
+
+      - component: toolbar
+        operation: click
+        target:
+          label: 新增
+          sub_label: 特定目标类
+
+      - component: form
+        operation: fill
+        target:
+          fields:
+            存续状态: 2 阶段性
+            资金管理处室: 01 预算处
+            项目名称: "ys测试{{random.suffix}}"
+            项目期限: 1
+            项目概述: 测试
+            项目目录: 101 财政一级
+
+      - component: toolbar
+        operation: click
+        target:
+          label: 保存
+
+      - component: table
+        operation: capture_row_values
+        target:
+          match:
+            column: 项目名称
+            equals: "ys测试{{random.suffix}}"
+          capture:
+            yjxm.project_code: 项目代码
+            yjxm.project_name: 项目名称
+
+      - component: tab
+        operation: click
+        target:
+          label: 待提交
+
+      - component: table_row_selection
+        operation: select
+        target:
+          match:
+            column: 项目代码
+            equals: "{{yjxm.project_code}}"
+
+      - component: toolbar
+        operation: click
+        target:
+          label: 提交
+
+  - code: audit-captured-project
+    name: 审核前序用例提交的数据
+    user: 默认用户
+    steps:
+      - action: open_menu
+        menu_path: 项目库>>一级项目>>一级项目审核（财政）
+
+      - component: query
+        operation: search
+        target:
+          conditions:
+            - field: 项目代码
+              equals: "{{yjxm.project_code}}"
+
+      - component: table_row_selection
+        operation: select
+        target:
+          match:
+            column: 项目代码
+            equals: "{{yjxm.project_code}}"
+
+      - component: toolbar
+        operation: click
+        target:
+          label: 审核

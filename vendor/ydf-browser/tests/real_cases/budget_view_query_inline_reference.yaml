@@ -1,0 +1,26 @@
+# 回归：内联参照的 ModalSelect/modal-btn 类名不得被识别为前景弹窗。
+# 仅打开菜单、切换页签并查询，不修改业务数据。
+# 验收：支付摘要成功绑定并执行 query.search；查询结果业务正确性不属于本用例。
+suite:
+  code: budget-view-query-inline-reference
+  name: 预算支付全景-内联参照不遮挡查询字段
+  tenant: 财政一体化
+  default_org: 南昌市局本级
+cases:
+  - code: query-summary-with-inline-reference
+    name: 待提交页签按支付摘要查询
+    user: 15500100121
+    tags: [regression]
+    steps:
+      - action: open_menu
+        menu_path: 预算支付全景
+      - component: tab
+        operation: click
+        target:
+          label: 待提交
+      - component: query
+        operation: search
+        target:
+          conditions:
+            - field: 支付摘要
+              equals: YDF_QUERY_INLINE_REFERENCE_8c11977e92904ad2

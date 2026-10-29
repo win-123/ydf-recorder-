@@ -1,0 +1,39 @@
+# 来源：经费申请单选择指标后误报参照已关闭。
+# 不保存、不提交；断言父页面指标回填，首条候选数据变化时需核对环境。
+suite:
+  code: apply_bill_iframe_reference_parent_footer
+  name: 经费申请单 iframe 参照父级确认回归
+  tenant: 财政一体化
+cases:
+- code: apply-bill-iframe-reference
+  name: 选择指标后回填父页面
+  user: 13916730164
+  default_org: 江西省局本级（主管单位/单位经办）
+  steps:
+  - action: open_menu
+    menu_path: 事前申请>>申请办理>>申请单填报
+  - component: toolbar
+    operation: click
+    target:
+      label: 新增
+      sub_label: 经费申请单
+  - component: form
+    operation: fill
+    target:
+      fields:
+        申请事由: 【自动化】【ydf-browser】经费申请单验证
+  - component: toolbar
+    operation: click
+    target:
+      label: 选择指标
+  - component: popup_reference
+    operation: select
+    target:
+      title: 选择指标
+      first_available: true
+  - component: table
+    operation: assert_column_values
+    target:
+      table: 指标信息
+      column: 项目
+      equals: 360000241010010000021 财务三级wdy

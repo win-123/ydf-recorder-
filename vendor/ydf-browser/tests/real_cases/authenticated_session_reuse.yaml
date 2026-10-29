@@ -1,0 +1,38 @@
+# 只读用例：运行两次以验证跨用例与跨 CLI 会话复用；认证次数见准备阶段报告。
+suite:
+  code: real-session-reuse
+  name: 同账号连续用例会话复用
+  description: 只读验证连续用例及跨命令认证复用
+  tenant: 财政一体化
+  default_org: '101001'
+cases:
+- code: session-first
+  name: 首次读取合同审核列表
+  user: 15747894789
+  tags:
+  - regression
+  - performance
+  steps:
+  - action: open_menu
+    menu_path: 合同管理>>合同审核>>合同审核
+  - component: table
+    operation: assert_columns
+    target:
+      present:
+      - 合同编号
+      - 合同名称
+- code: session-next
+  name: 同账号再次读取合同审核列表
+  user: 15747894789
+  tags:
+  - regression
+  - performance
+  steps:
+  - action: open_menu
+    menu_path: 合同管理>>合同审核>>合同审核
+  - component: table
+    operation: assert_columns
+    target:
+      present:
+      - 合同编号
+      - 合同名称

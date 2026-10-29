@@ -1,0 +1,18 @@
+# 用 --ai-observe 运行后检查新增步骤的 page_observation；只观察，不保存。
+suite:
+  code: expert-field-constraint-observation
+  name: 专家库新增字段约束观察
+  tenant: 财政一体化
+  default_org: '101001'
+  fiscal_year: '2026'
+cases:
+- code: observe-add-form
+  name: 读取新增表单必填和公开格式约束
+  user: '15001365888'
+  steps:
+  - action: open_menu
+    menu_path: 预算绩效>>专家库>>专家库
+  - component: toolbar
+    operation: click
+    target:
+      label: 新增

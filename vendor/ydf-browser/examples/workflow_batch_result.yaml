@@ -1,0 +1,49 @@
+suite:
+  code: workflow-batch-result-example
+  name: 工作流批量结果层示例
+  tenant: __PRIVATE_TENANT__
+  default_org: __PRIVATE_DEFAULT_ORG__
+
+cases:
+  - code: partial-failure
+    name: 批量操作部分失败
+    user: __PRIVATE_USER__
+    steps:
+      - action: open_menu
+        menu_path: 采购管理>>采购计划
+      - component: toolbar
+        operation: click
+        target:
+          label: 审核
+      - component: workflow_result
+        operation: assert
+        target:
+          total: 2
+          succeeded: 1
+          failed: 1
+      - component: workflow_result
+        operation: details
+        target: {}
+      - component: dialog
+        operation: confirm
+        target:
+          label: 确定
+      - component: workflow_result
+        operation: confirm
+        target: {}
+
+  - code: all-success
+    name: 批量操作全部成功
+    user: __PRIVATE_USER__
+    steps:
+      - action: open_menu
+        menu_path: 采购管理>>采购计划
+      - component: toolbar
+        operation: click
+        target:
+          label: 审核
+      - component: notification
+        operation: assert
+        target:
+          type: success
+          contains: 成功

@@ -1,0 +1,54 @@
+# 回归：新增模板延迟到 form.fill 应用后，去签章必须恢复父列表并直接查询。
+# base_url: https://tv5-ydf.yonyougov.top
+# 数据影响：每次保存一笔 0.01 的测试单据，摘要带唯一后缀；不签章、不删除。
+# 验收：dialog.confirm 报告 auto_restored_template=true；查询命中本次新增单据。
+# 原症状：页面已到初审签章，执行器仍持有录入模板，报“未绑定查询字段: 支付摘要”。
+suite:
+  code: pay-voucher-confirm-restore-query
+  name: 集中支付-去签章后恢复查询上下文
+  tenant: 财政一体化
+  default_org: 101001
+cases:
+  - code: confirm-then-query
+    name: 保存后去签章直接查询新增单据
+    user: 15001365888
+    tags: [regression]
+    steps:
+      - action: open_menu
+        menu_path: 集中支付全景
+      - component: table_row_selection
+        operation: select
+        target: {row_numbers: 1}
+      - component: toolbar
+        operation: click
+        target: {label: 新增, sub_label: 普通转账}
+      - component: form
+        operation: fill
+        target:
+          fields:
+            收款人全称: {first_available: true}
+            申请金额: 0.01
+            支付摘要: 'YDF_CONFIRM_RESTORE_{{random.suffix}}'
+            单位内设机构: {first_available: true}
+            资金往来对象类别: 11 与部门外同级政府单位
+      - component: toolbar
+        operation: click
+        target: {label: 保存}
+      - component: dialog
+        operation: confirm
+        target: {label: 去签章}
+      - component: query
+        operation: search
+        target:
+          conditions:
+            - field: 支付摘要
+              equals: 'YDF_CONFIRM_RESTORE_{{random.suffix}}'
+      - component: table
+        operation: assert_row_values
+        target:
+          table: bg_table
+          match:
+            column: 支付摘要
+            equals: 'YDF_CONFIRM_RESTORE_{{random.suffix}}'
+          fields:
+            支付摘要: 'YDF_CONFIRM_RESTORE_{{random.suffix}}'

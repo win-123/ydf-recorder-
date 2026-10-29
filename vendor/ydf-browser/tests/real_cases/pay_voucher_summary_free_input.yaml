@@ -1,0 +1,31 @@
+# 回归：可输入页面参照允许录入不存在于参照候选中的新摘要。
+# 数据影响：只打开新增表单并录入摘要，不保存、不提交。
+suite:
+  code: pay-voucher-summary-free-input
+  name: 集中支付-支付摘要自由输入
+  tenant: 财政一体化
+  default_org: 101001
+cases:
+  - code: summary-free-input
+    name: 可输入页面参照录入新摘要并回读
+    user: 15001365888
+    tags: [regression]
+    steps:
+      - action: open_menu
+        menu_path: 集中支付全景
+      - component: table_row_selection
+        operation: select
+        target: {row_numbers: 1}
+      - component: toolbar
+        operation: click
+        target: {label: 新增, sub_label: 普通转账}
+      - component: form
+        operation: fill
+        target:
+          fields:
+            支付摘要: 'YDF_FREE_INPUT_{{random.suffix}}'
+      - component: form
+        operation: assert_values
+        target:
+          fields:
+            支付摘要: 'YDF_FREE_INPUT_{{random.suffix}}'

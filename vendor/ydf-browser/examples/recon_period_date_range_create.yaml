@@ -1,0 +1,38 @@
+suite:
+  code: recon_period_date_range_create
+  name: 对账期间日期范围新增
+  description: 验证 YDFDateRange 字段可通过 form.fill 标量区间写法录入并保存
+  tenant: 财政一体化
+cases:
+  - code: create-date-range
+    name: 新增对账期间日期范围
+    user: 默认用户
+    default_org: 南昌市局本级
+    steps:
+      - action: open_menu
+        menu_path: 电子对账>>系统设置>>对账期间设置
+
+      - component: toolbar
+        operation: click
+        target:
+          label: 新增
+
+      - component: form
+        operation: fill
+        target:
+          fields:
+            年度: 2026
+            对账月份: 1月
+            对账起止日期: "2026-01-01~2026-01-12"
+            提醒内容: 请及时完成对账，否则可能会影响之后的支付！
+
+      - component: toolbar
+        operation: click
+        target:
+          label: 确定
+
+      - component: notification
+        operation: assert
+        target:
+          type: success
+          contains: 保存成功

@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ydf-browser"
+version = "0.1.43"
+description = "YonDiF browser automation CLI for template-driven forms"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "openpyxl>=3.1.0",
+    "playwright==1.61.0",
+    "PyYAML>=6.0.1",
+    "requests>=2.32.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3.0",
+]
+sms-verify = [
+    "ddddocr==1.6.1",
+]
+
+[project.scripts]
+ydf-browser = "ydf_browser.cli:console_main"
+
+[tool.setuptools.packages.find]
+include = ["ydf_browser*"]

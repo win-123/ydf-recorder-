@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "YDF browser verification result",
+  "type": "object",
+  "required": ["status", "reason_code", "runs", "cleanup", "fingerprints"],
+  "properties": {
+    "status": {"enum": ["verified", "not_verified", "invalid"]},
+    "reason_code": {"type": "string"},
+    "business_assertions_passed": {"type": "boolean"},
+    "runs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["phase", "qualified", "dsl_sha256", "run_dir", "tool_outcome", "report", "assertion_receipt", "request_id", "flow_request_ids", "api_business_id", "ui_business_id", "local_forward_hit"],
+        "properties": {
+          "phase": {"enum": ["red", "green"]},
+          "qualified": {"type": "boolean"},
+          "dsl_sha256": {"type": "string", "minLength": 64, "maxLength": 64},
+          "run_dir": {"type": "string"},
+          "tool_outcome": {"type": "string"},
+          "report": {"type": "string"},
+          "assertion_receipt": {"type": ["object", "null"]},
+          "request_id": {"type": ["string", "null"]},
+          "flow_request_ids": {
+            "type": "object",
+            "required": ["precondition", "mutation", "postcondition"],
+            "properties": {
+              "precondition": {"type": ["string", "null"]},
+              "mutation": {"type": ["string", "null"]},
+              "postcondition": {"type": ["string", "null"]}
+            }
+          },
+          "api_business_id": {"type": ["string", "null"]},
+          "ui_business_id": {"type": ["string", "null"]},
+          "local_forward_hit": {"type": "boolean"}
+        }
+      }
+    },
+    "cleanup": {
+      "type": "object",
+      "required": ["success", "identifiers", "last_known_state"]
+    },
+    "fingerprints": {
+      "type": "object",
+      "required": ["verified", "before", "after"]
+    }
+  }
+}

@@ -1,0 +1,59 @@
+# 来源：易耗品物资入库 RK-ZX-01 第 6 步失败现场。
+# 目标：证明 tree + first_available 选择右侧商品行，而不是把左树节点当作最终候选。
+# 安全边界：不保存、不提交，不产生业务单据。
+suite:
+  code: material_stock_in_popup_reference_row_selection
+  name: 易耗品物资入库参照右表行选择回归
+  tenant: 财政一体化
+  default_org: "101001"
+cases:
+  - code: material-stock-in-popup-row
+    name: 物资分类选择右侧首条商品
+    user: 15001365888
+    default_org: "101001"
+    steps:
+      - action: open_menu
+        menu_path: 易耗品物资>>入库登记>>入库填报
+
+      - component: tab
+        operation: click
+        target:
+          label: 待提交
+
+      - component: toolbar
+        operation: click
+        target:
+          label: 新增
+
+      - component: form
+        operation: fill
+        target:
+          fields:
+            来源方式: 采购
+
+      - component: editable_table
+        operation: add_row
+        target:
+          table: 物资信息
+          label: 新增
+
+      - component: editable_table
+        operation: fill_row
+        target:
+          table: 物资信息
+          row_number: -1
+          fields:
+            物资分类:
+              tree:
+                label: A05040101 复印纸
+              first_available: true
+
+      - component: table
+        operation: assert_row_values
+        target:
+          table: wuzhiList
+          match:
+            column: 物资名称
+            equals: A4复印纸98642593
+          fields:
+            物资类型: 复印纸

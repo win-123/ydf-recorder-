@@ -1,0 +1,4 @@
+interface:
+  display_name: "Gov YDF Dev Browser"
+  short_description: "Generate and run YDF browser DSL suites"
+  default_prompt: "Use $gov-ydfdev-browser to create and run a ydf-browser DSL suite for my YonDiF workflow."

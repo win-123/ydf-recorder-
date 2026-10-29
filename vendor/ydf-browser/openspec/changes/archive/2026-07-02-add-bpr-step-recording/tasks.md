@@ -1,0 +1,36 @@
+- [x] 1. OpenSpec 定义
+  - [x] 1.1 新增 `bpr-step-recording` delta spec，定义 DSL、状态机、报告和 Excel 输出要求。
+  - [x] 1.2 运行 `openspec validate add-bpr-step-recording --strict`。
+  - [x] 1.3 运行 `./scripts/check_openspec_language.py --change add-bpr-step-recording`。
+- [x] 2. DSL 与模型
+  - [x] 2.1 在 `ydf_browser/dsl.py` 增加 `bpr.start` / `bpr.stop` schema。
+  - [x] 2.2 在报告数据结构中携带 case 级 `bpr_sessions`。
+  - [x] 2.3 补充 DSL 校验单元测试。
+  - [x] 2.4 在 DSL 加载校验阶段提前拒绝 BPR 嵌套、无 active stop 和缺少 stop。
+- [x] 3. Runtime BPR 接入
+  - [x] 3.1 在 `PlaywrightRuntime` 增加 `start_bpr()`，写入 BPR cookies 并调用 `/monitor/record`。
+  - [x] 3.2 在 `PlaywrightRuntime` 增加 `stop_bpr()`，提交最小 UBA 数据并返回在线报告 URL。
+  - [x] 3.3 补充 runtime 单元测试，覆盖 cookie 编码、接口 URL、stop 响应解析和错误处理。
+- [x] 4. 执行器状态机
+  - [x] 4.1 在 `WorkflowExecutor` 支持 `bpr.start` / `bpr.stop`。
+  - [x] 4.2 记录 start/stop 控制步骤、业务步骤范围和包含步骤。
+  - [x] 4.3 支持同一 case 多段 BPR 录制。
+  - [x] 4.4 保留执行器 BPR 状态保护，用于防御绕过 DSL 加载器的内部入口。
+  - [x] 4.6 将 `--performance` 作为 BPR 录制总开关；未开启时过滤 BPR 控制步骤且不调用 runtime。
+  - [x] 4.5 补充执行器单元测试。
+- [x] 5. 报告输出
+  - [x] 5.1 在 `report.json` case report 中输出 `bpr_sessions`。
+  - [x] 5.2 在 `report_html.py` 展示 BPR 录制范围和在线链接。
+  - [x] 5.3 在 `performance_xlsx.py` 新增 `BPR录制` sheet。
+  - [x] 5.4 补充 report HTML 和 Excel 单元测试。
+  - [x] 5.5 未开启 `--performance` 时，不因 BPR 步骤单独生成 `performance.xlsx`，且运行产物不包含 BPR 痕迹。
+- [x] 6. 文档与示例
+  - [x] 6.1 更新 `schemas/dsl.schema.json`，让编辑器和 schema 校验识别 `bpr.start` / `bpr.stop`。
+  - [x] 6.2 更新 `skills/gov-ydfdev-browser/references/dsl-reference.md`，说明 BPR 局部录制 DSL、状态约束和报告产出。
+  - [x] 6.3 更新 `README.md`，把 BPR 步骤和 `performance.xlsx` 的 `BPR录制` sheet 写入用户可见说明。
+  - [x] 6.4 更新 `docs/action-capability-test-plan.md`，把 `bpr.start` / `bpr.stop` 纳入 DSL 能力覆盖矩阵和测试模板。
+  - [x] 6.5 增加示例 YAML，展示一个 start/业务步骤/stop 的局部 BPR 录制用例。
+- [x] 7. 验证
+  - [x] 7.1 运行相关单元测试：`tests/test_dsl.py`、`tests/test_executor.py`、`tests/test_runtime.py`、`tests/test_runner.py`、`tests/test_report_html.py`、`tests/test_performance_xlsx.py`。
+  - [x] 7.2 使用临时 DSL 在 d9i 环境做一次真实 BPR 链路验证，并记录报告 URL。
+  - [x] 7.3 再次运行 OpenSpec 结构和语言校验。

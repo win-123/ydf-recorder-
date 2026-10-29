@@ -37,6 +37,12 @@ python3 -m venv "$BUILD_VENV"
 "$BUILD_VENV/bin/pip" install --upgrade pip -q
 "$BUILD_VENV/bin/pip" install pyinstaller -q
 "$BUILD_VENV/bin/pip" install "$ROOT" -q
+# 回放器：--no-deps 安装 vendor/ydf-browser（playwright 版本随主环境，
+# 与内嵌 Chromium 对齐；避免运行时 venv 里再背一份浏览器）
+if [[ -d "$ROOT/vendor/ydf-browser" ]]; then
+  "$BUILD_VENV/bin/pip" install --no-deps "$ROOT/vendor/ydf-browser" -q
+  echo "    已安装 vendor/ydf-browser（回放器）"
+fi
 
 echo "==> [2/8] PyInstaller 打包（onedir，含 playwright node driver）"
 rm -rf "$PYI_DIST" "$PYI_WORK"
@@ -112,6 +118,16 @@ else
   else
     echo "    ⚠️ --skip-browsers 但没有可复用的 Chromium，应用将无法录制"
   fi
+fi
+
+echo "==> [5.5/8] 回放器子可执行（ydf-browser CLI，供录制器回放 YAML）"
+if [[ -d "$ROOT/vendor/ydf-browser" ]]; then
+  echo "    构建 ydfbrowser-cli..."
+  "$BUILD_VENV/bin/pyinstaller" "$ROOT/desktop/ydfbrowser-cli.spec" \
+    --noconfirm --distpath "$PYI_DIST" --workpath "$PYI_WORK" > /dev/null 2>&1 \
+    && cp -R "$PYI_DIST/ydfbrowser-cli" "$APP_DIR/Contents/Resources/ydfbrowser-cli" \
+    && echo "    ydfbrowser-cli 已内置" \
+    || echo "    ⚠️ ydfbrowser-cli 构建失败（应用仍可录制，回放不可用）"
 fi
 
 echo "==> [6/8] ad-hoc 代码签名"

@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "channel": "stable",
+  "version": "0.1.25",
+  "min_python": "3.11",
+  "min_skill_version": "0.1.24",
+  "platforms": {
+    "all": {
+      "url": "https://061981.xyz/ydf-browser/ydf-browser-release-0.1.25-all.zip?v=0.1.25-20260814",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    }
+  }
+}

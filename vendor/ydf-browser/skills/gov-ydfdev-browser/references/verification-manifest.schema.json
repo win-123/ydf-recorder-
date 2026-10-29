@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "YDF browser verification manifest",
+  "type": "object",
+  "required": ["inputs", "baseline", "fingerprints"],
+  "properties": {
+    "inputs": {
+      "type": "object",
+      "required": ["dsl", "cleanup_dsl", "readiness"],
+      "properties": {
+        "dsl": {"type": "string"},
+        "cleanup_dsl": {"type": "string"},
+        "readiness": {"type": "string"}
+      }
+    },
+    "baseline": {
+      "type": "object",
+      "required": ["business_repo_head", "business_repo_porcelain", "file_sha256"]
+    },
+    "fingerprints": {
+      "type": "object",
+      "required": ["release_package_sha256", "ydf_browser", "agents_skill", "helper_sha256"]
+    }
+  },
+  "additionalProperties": false
+}

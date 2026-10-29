@@ -1,0 +1,63 @@
+# 真实回归：拨款申请退回操作框的无模板表单录入。
+# 原错误：请选择退回环节使用 first_available 时，被当作 RuntimeInput，报告不支持该值。
+# 根因：纯标签继承整层弹窗的可编辑状态；无显式 role 的普通下拉未被识别为选择控件。
+# 修复：共享扫描按控件自身判断可编辑性，识别平台普通下拉，继续使用 form.fill。
+# 安全边界：只通过 pay_allo_no 定位指定单据；捕获退回环节后取消，不确认退回。
+# 预期：选中一个可用环节并读回非空值，取消后同一单据仍存在且状态不变。
+# 数据影响：只修改未确认操作框中的临时值，不新增、删除、送审或退回单据。
+# 前置：配置所引用的用户别名、租户和组织；指定单据须在当前审核列表且允许打开退回框。
+# 运行前结束同账号的其它失败暂停会话，避免等待认证锁。
+# run: ./.venv/bin/python -m ydf_browser.cli run --dsl tests/real_cases/pay_allocation_return_dialog_form.yaml --env t53 --var pay_allo_no='待审核拨款申请号' --headless
+suite:
+  code: pay-allocation-return-dialog-form
+  name: 拨款申请退回操作框字段回归
+  tenant: 财政一体化
+  default_org: 江西省
+cases:
+  - code: return-dialog-fill-and-cancel
+    name: 退回环节选择后取消并核对原状态
+    user: '18400000001'
+    steps:
+      - action: open_menu
+        menu_path: 预算拨款>>国库实有资金拨款申请>>拨款申请审核
+      - component: table
+        operation: capture_row_values
+        target:
+          match:
+            column: 拨款申请号
+            equals: '{{pay_allo_no}}'
+          capture:
+            original_status: 状态
+      - component: table_row_selection
+        operation: select
+        target:
+          match:
+            column: 拨款申请号
+            equals: '{{pay_allo_no}}'
+      - component: toolbar
+        operation: click
+        target:
+          label: 退回
+      - component: form
+        operation: fill
+        target:
+          fields:
+            请选择退回环节:
+              first_available: true
+      - component: form
+        operation: capture_values
+        target:
+          capture:
+            selected_return_stage: 请选择退回环节
+      - component: dialog
+        operation: cancel
+        target:
+          label: 取消
+      - component: table
+        operation: assert_row_values
+        target:
+          match:
+            column: 拨款申请号
+            equals: '{{pay_allo_no}}'
+          values:
+            状态: '{{original_status}}'

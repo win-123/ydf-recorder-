@@ -1,0 +1,45 @@
+#!/usr/bin/env sh
+set -eu
+
+SCRIPT_PATH=$0
+case "$SCRIPT_PATH" in
+  */*) ;;
+  *)
+    RESOLVED=$(command -v "$SCRIPT_PATH" 2>/dev/null || true)
+    if [ -n "$RESOLVED" ]; then
+      SCRIPT_PATH=$RESOLVED
+    fi
+    ;;
+esac
+
+while [ -h "$SCRIPT_PATH" ]; do
+  SCRIPT_DIR=$(CDPATH= cd -P -- "$(dirname -- "$SCRIPT_PATH")" && pwd)
+  LINK_TARGET=$(readlink "$SCRIPT_PATH")
+  case "$LINK_TARGET" in
+    /*) SCRIPT_PATH=$LINK_TARGET ;;
+    *) SCRIPT_PATH=$SCRIPT_DIR/$LINK_TARGET ;;
+  esac
+done
+
+SCRIPT_DIR=$(CDPATH= cd -P -- "$(dirname -- "$SCRIPT_PATH")" && pwd)
+RELEASE_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
+
+if [ "${1:-}" != "update" ] && [ "${1:-}" != "completion" ] && [ "${YDF_BROWSER_AUTO_UPDATE:-1}" != "0" ]; then
+  if [ -x "$RELEASE_ROOT/runtime/.venv/bin/python" ]; then
+    nohup "$RELEASE_ROOT/runtime/.venv/bin/python" -m ydf_browser.updater --background </dev/null >/dev/null 2>&1 &
+  elif [ -x "$RELEASE_ROOT/runtime/venv/bin/python" ]; then
+    nohup "$RELEASE_ROOT/runtime/venv/bin/python" -m ydf_browser.updater --background </dev/null >/dev/null 2>&1 &
+  fi
+fi
+
+if [ -x "$RELEASE_ROOT/runtime/.venv/bin/python" ]; then
+  exec "$RELEASE_ROOT/runtime/.venv/bin/python" -m ydf_browser.cli "$@"
+fi
+
+if [ -x "$RELEASE_ROOT/runtime/venv/bin/python" ]; then
+  exec "$RELEASE_ROOT/runtime/venv/bin/python" -m ydf_browser.cli "$@"
+fi
+
+echo "ydf-browser runtime is not installed under $RELEASE_ROOT/runtime." >&2
+echo "Run: $RELEASE_ROOT/scripts/install-runtime.sh" >&2
+exit 127

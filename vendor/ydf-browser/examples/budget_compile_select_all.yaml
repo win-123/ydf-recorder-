@@ -1,0 +1,54 @@
+suite:
+  code: tx-ysgl-ysbz-select-all
+  name: 预算编制科目维护会计科目全选
+  description: 选择会计科目弹窗中通过表头 checkbox 勾选全部会计科目
+  tenant: 财政一体化
+  default_org: 南昌市局本级
+cases:
+  - code: select-accounting-subjects
+    name: 会计科目全选
+    description: 选择预算模板后新增预算编制科目，并在选择会计科目弹窗中全选候选行
+    user: 人员21
+    steps:
+      - action: open_menu
+        menu_path: 项目库>>系统设置>>预算模板
+
+      - component: tree
+        operation: select
+        target:
+          label: 教育预算模版04
+
+      - component: toolbar
+        operation: click
+        target:
+          label: 预算编制科目维护
+          sub_label: 新增
+
+      - component: form
+        operation: fill
+        target:
+          fields:
+            预算编制科目代码: ysbz00
+            预算编制科目名称: 预算编制科目
+
+      - component: toolbar
+        operation: click
+        target:
+          label: 选择会计科目
+
+      - component: query
+        operation: search
+        target:
+          conditions:
+            - field: 账套
+              equals: "100 网报账套"
+
+      - component: table_row_selection
+        operation: select
+        target:
+          select_all: true
+
+      - component: toolbar
+        operation: click
+        target:
+          label: 确认

@@ -356,11 +356,16 @@ def _safe_json(response: requests.Response) -> Any:
 
 
 def _find_tenant_id(payload: Any, name: str) -> str:
-    """从租户列表中按名称查找 tenant_id。"""
+    """从租户列表中查找 tenant_id。
+
+    匹配规则：租户名称 / tenantId / tenantCode 任一相等即可命中
+    （用户在配置里可能填名称「财政一体化」，也可能填 ID「knznywua」）。
+    """
     for node in _walk_tenant_nodes(payload):
         node_id = _first_value(node, ("tenantId", "tenant_id", "id", "value", "key"))
         node_name = _first_value(node, ("tenantName", "tenant_name", "name", "label", "title"))
-        if name and node_name == name:
+        node_code = _first_value(node, ("tenantCode", "tenant_code", "code"))
+        if name and name in {node_name, node_id, node_code}:
             return node_id
     return ""
 

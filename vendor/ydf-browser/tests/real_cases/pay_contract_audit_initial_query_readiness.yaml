@@ -1,0 +1,48 @@
+# 真实回归环境基线（2026-08-21；仅作运行前核对，不参与 DSL 解析）
+# base_url: https://tv5-ydf.yonyougov.top
+# tenant: 财政一体化
+# user_alias: 15747894789
+# default_org: "101001"
+# menu_path: 合同管理>>合同审核>>合同审核
+# expected: open_menu 等待初次列表查询遮罩消失，随后 query.search 成功执行并可观察合同列表列。
+# data_impact: 仅查询，不选择、不审核、不保存，不产生业务数据变更。
+# business_assertion: query.search 成功完成，且结果表保留“合同编号”“合同名称”列。
+#
+# Bug 现象: open_menu 把遮罩下的“暂无数据”误判为终态，query.search 在初次列表查询结束前填写条件，
+# 随后报“未找到可点击查询动作: 查询”。
+# 原因: 初次查询使用页面级 .wui-spin-backdrop；工作面扫描只检查表格根内部的 busy 节点，漏掉覆盖
+# 表格但不属于表格 DOM 子树的加载遮罩。
+# 解决: 将可见且几何覆盖工作面的页面级 WUI 遮罩计入该工作面的 busy 状态；页面级遮罩消失只解除
+# 阻塞，不作为组件业务转换完成证据，继续复用 open_menu 现有 100ms 轮询和步骤总预算。
+# 失败关闭边界: 不覆盖目标工作面的 WUI 遮罩不阻塞该工作面；覆盖遮罩持续存在时按既有 open_menu
+# 总超时失败，不使用固定等待，也不把任意页面 spinner 归属到所有工作面。
+# run: ./.venv/bin/python -m ydf_browser.cli run --dsl tests/real_cases/pay_contract_audit_initial_query_readiness.yaml --headless
+
+suite:
+  code: real-regression-pay-contract-audit-initial-query-readiness
+  name: 付款合同审核-初次列表查询就绪真实回归
+  description: 验证页面级 WUI 加载遮罩覆盖主表时 open_menu 不会提前放行
+  tenant: 财政一体化
+  default_org: "101001"
+cases:
+  - code: pay-contract-audit-initial-query-readiness
+    name: 初次列表查询完成后按合同名称查询
+    user: 15747894789
+    tags: [regression]
+    steps:
+      - action: open_menu
+        menu_path: 合同管理>>合同审核>>合同审核
+
+      - component: query
+        operation: search
+        target:
+          conditions:
+            - field: 合同名称
+              equals: UI合同
+
+      - component: table
+        operation: assert_columns
+        target:
+          present:
+            - 合同编号
+            - 合同名称

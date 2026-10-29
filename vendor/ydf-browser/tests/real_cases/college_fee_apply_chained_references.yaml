@@ -1,0 +1,62 @@
+# 来源：费用明细新增后默认确认误报“选择项目未关闭”，全部确认后又无法按费用明细定位。
+# 根因：后台旧参照仍挂载，连续动态模板未应用、退出；修复共享关闭判定和父模板恢复。
+# 预期：默认确认三个参照后按费用明细录入金额，并回读 200.00。
+# 不保存、不提交；原参照仍活跃时不得误报完成，父模板证据不足时不得越过恢复。
+# 使用当前候选第一行，环境数据变化时需核对可用组合。
+# 运行：./.venv/bin/python -m ydf_browser.cli run --dsl tests/real_cases/college_fee_apply_chained_references.yaml --headless
+suite:
+  code: college_fee_apply_chained_references
+  name: 高校经费申请单连续参照回归
+  description: 连续三个参照默认确认后恢复费用明细并录入金额；不保存、不提交
+  tenant: 高校科研
+cases:
+- code: chained-reference-confirm-restore
+  name: 连续确认项目、指标和费用后按名称录入明细
+  description: 省略 confirm 使用默认 true，最终按费用明细名称录入并回读金额
+  user: 15136093794
+  default_org: 北京市局本级（主管单位/单位经办）
+  steps:
+  - action: open_menu
+    menu_path: 事前申请>>申请办理>>申请单填报
+  - component: toolbar
+    operation: click
+    target:
+      label: 新增
+      sub_label: 经费申请单
+  - component: editable_table
+    operation: add_row
+    target:
+      label: 新增
+      table: 费用明细
+  - component: tab
+    operation: click
+    target:
+      label: 全部
+  - component: popup_reference
+    operation: select
+    target:
+      title: 选择项目
+      row_number: 1
+  - component: popup_reference
+    operation: select
+    target:
+      title: 选择指标
+      row_number: 1
+  - component: popup_reference
+    operation: select
+    target:
+      title: 选择费用
+      row_number: 1
+  - component: editable_table
+    operation: fill_row
+    target:
+      table: 费用明细
+      row_number: 1
+      fields:
+        申请金额: '200'
+  - component: table
+    operation: assert_column_values
+    target:
+      table: 费用明细
+      column: 申请金额
+      equals: '200.00'

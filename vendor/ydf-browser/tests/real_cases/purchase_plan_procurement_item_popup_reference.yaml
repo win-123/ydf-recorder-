@@ -1,0 +1,62 @@
+# 真实回归环境基线（2026-08-20；仅作运行前核对，不参与 DSL 解析）
+# base_url: https://tv5-ydf.yonyougov.top
+# tenant: 财政一体化
+# user_alias: 15747894789
+# default_org: "101001"
+# menu_path: 采购管理>>采购计划>>采购计划编制
+# expected: “采购品目”参照选择 A02010105 后完成确认和回填，且使用 verified 契约、不走 fallback。
+# data_impact: 用例不确认明细行、不保存、不提交，不产生业务单据。
+#
+# Bug 现象: 计划明细行编辑表单填写“采购品目”时报“表单字段[采购品目]的平台精确身份状态不兼容”。
+# 原因: YDFTableModalSelect 的运行时 DOM 在同一 identity_root 下暴露多个 div/label wrapper、只读 input
+# 和一个 editable=false 但可接收指针的原生 button；绑定器无法收敛到唯一参照按钮。按钮绑定后若直接作为
+# 字段根读取，又会遗漏外层字段 owner 上的回填值。
+# 解决: 标准 modal reference 组件只在唯一可点击 button 时收敛精确身份；选择和回填校验优先使用前景
+# 字段 owner，多按钮仍保持失败关闭。
+# run: ./.venv/bin/python -m ydf_browser.cli run --dsl tests/real_cases/purchase_plan_procurement_item_popup_reference.yaml --headless
+
+suite:
+  code: real-regression-purchase-plan-procurement-item-popup-reference
+  name: 采购计划-采购品目参照真实回归
+  description: 验证标准表格参照唯一按钮绑定和字段 owner 回填
+  tenant: 财政一体化
+  default_org: "101001"
+cases:
+  - code: purchase-plan-procurement-item-popup-reference
+    name: 计划明细选择采购品目
+    user: 15747894789
+    tags: [regression]
+    steps:
+      - action: open_menu
+        menu_path: 采购管理>>采购计划>>采购计划编制
+
+      - component: toolbar
+        operation: click
+        target:
+          label: 新增
+          sub_label: 采购计划
+
+      - component: form
+        operation: fill
+        target:
+          fields:
+            使用虚拟预算: 是
+            预算项目:
+              first_available: true
+
+      - component: editable_table
+        operation: add_row
+        target:
+          label: 新增
+          table: 计划明细
+          editor: form
+
+      - component: form
+        operation: fill
+        target:
+          fields:
+            采购品目:
+              filter: A02010105
+              match:
+                column: 政府采购品目代码
+                equals: A02010105

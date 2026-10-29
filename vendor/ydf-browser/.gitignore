@@ -1,0 +1,12 @@
+.venv/
+.pytest_cache/
+__pycache__/
+*.pyc
+*.egg-info/
+config/env.local.yaml
+.ydf-browser/
+.worktrees/
+tmp/
+reports/
+dist/
+wheels/

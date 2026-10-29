@@ -1,0 +1,77 @@
+# 来源：物资领用申请真实报告中，物资分类参照录入约 157 秒，重复查询约 18 秒。
+# 根因：参照先展开后搜索，叶子占位图标重复点击；相同查询结果缺少强完成信号。
+# 修复：共享参照搜索优先和展开去重；本次目标表格成功响应与局部就绪联合判断。
+# 前置：当前组织在“A05040101 复印纸”分类下存在至少一条可用物资。
+# 预期：参照确认回填并读回分类、数量；两次相同查询均为 target_component，fallback_used=false。
+# 边界：不保存、不提交；first_available 只选择右表可用业务行，树上下文不是最终值。
+# 运行：通过 --vars-file 提供 tenant、user、default_org；选择对应 --env。
+# ./.venv/bin/python -m ydf_browser.cli run --dsl tests/real_cases/material_apply_reference_query_performance.yaml --vars-file <私有变量文件> --env <环境> --headless
+suite:
+  code: material-apply-reference-query-performance
+  name: 物资领用申请参照与重复查询性能回归
+  tenant: "{{tenant}}"
+  default_org: "{{default_org}}"
+cases:
+  - code: reference-search-first
+    name: 分类搜索选择后核对未保存明细
+    user: "{{user}}"
+    steps:
+      - action: open_menu
+        menu_path: 易耗品物资>>物资领用>>领用申请
+      - component: tab
+        operation: click
+        target:
+          label: 待提交
+      - component: toolbar
+        operation: click
+        target:
+          label: 新增
+      - component: editable_table
+        operation: add_row
+        target:
+          table: 物资信息
+          label: 新增
+      - component: editable_table
+        operation: fill_row
+        target:
+          table: 物资信息
+          row_number: -1
+          fields:
+            物资分类:
+              tree:
+                label: A05040101 复印纸
+              first_available: true
+            申请数量: "2"
+      - component: table
+        operation: assert_row_values
+        target:
+          table: 物资信息
+          match:
+            column: 物资分类
+            equals: 复印纸
+          fields:
+            物资分类: 复印纸
+            申请数量: "2"
+  - code: repeated-query
+    name: 已提交列表连续执行相同查询
+    user: "{{user}}"
+    steps:
+      - action: open_menu
+        menu_path: 易耗品物资>>物资领用>>领用申请
+      - component: tab
+        operation: click
+        target:
+          label: 已提交
+      - component: query
+        operation: search
+        target:
+          conditions: []
+      - component: query
+        operation: search
+        target:
+          conditions: []
+      - component: table
+        operation: assert_columns
+        target:
+          table: 物资领用申请
+          present: [单据编号, 申请数量, 申请事由]

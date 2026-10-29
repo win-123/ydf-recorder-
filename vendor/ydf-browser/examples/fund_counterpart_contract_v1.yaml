@@ -1,0 +1,106 @@
+suite:
+  code: fund_counterpart_contract_v1
+  name: 单位资金往来对象渲染契约验收
+  description: 参数化覆盖新增、查询、编辑、删除及删除后的空表断言；真实运行前替换私有环境占位符
+  tenant: __PRIVATE_TENANT__
+cases:
+  - code: create-edit-delete-counterpart
+    name: 新增编辑删除单位资金往来对象
+    user: __PRIVATE_USER__
+    default_org: __PRIVATE_DEFAULT_ORG__
+    steps:
+      - action: open_menu
+        menu_path: 单位资金往来对象
+
+      - component: toolbar
+        operation: click
+        target:
+          label: 新增
+
+      - component: form
+        operation: fill
+        target:
+          fields:
+            资金往来对象名称: 单位资金往来对象-{{random.suffix}}
+            主体类型: 企业
+            性质: 社会企业
+
+      - component: toolbar
+        operation: click
+        target:
+          label: 保存
+
+      - component: query
+        operation: search
+        target:
+          conditions:
+            - field: 资金往来对象名称
+              equals: 单位资金往来对象-{{random.suffix}}
+
+      - component: table
+        operation: assert_row_values
+        target:
+          table: BAS_FUND_COUNTERPART_TABLE
+          match:
+            column: 资金往来对象名称
+            equals: 单位资金往来对象-{{random.suffix}}
+          fields:
+            资金往来对象名称: 单位资金往来对象-{{random.suffix}}
+
+      - component: table_row_action
+        operation: click
+        target:
+          table: BAS_FUND_COUNTERPART_TABLE
+          action: 编辑
+          match:
+            column: 资金往来对象名称
+            equals: 单位资金往来对象-{{random.suffix}}
+
+      - component: form
+        operation: fill
+        target:
+          fields:
+            资金往来对象名称: 单位资金往来对象-编辑-{{random.suffix}}
+
+      - component: toolbar
+        operation: click
+        target:
+          label: 保存
+
+      - component: query
+        operation: search
+        target:
+          conditions:
+            - field: 资金往来对象名称
+              equals: 单位资金往来对象-编辑-{{random.suffix}}
+
+      - component: table
+        operation: assert_row_values
+        target:
+          table: BAS_FUND_COUNTERPART_TABLE
+          match:
+            column: 资金往来对象名称
+            equals: 单位资金往来对象-编辑-{{random.suffix}}
+          fields:
+            资金往来对象名称: 单位资金往来对象-编辑-{{random.suffix}}
+
+      - component: table_row_action
+        operation: click
+        target:
+          table: BAS_FUND_COUNTERPART_TABLE
+          action: 删除
+          match:
+            column: 资金往来对象名称
+            equals: 单位资金往来对象-编辑-{{random.suffix}}
+
+      - component: query
+        operation: search
+        target:
+          conditions:
+            - field: 资金往来对象名称
+              equals: 单位资金往来对象-编辑-{{random.suffix}}
+
+      - component: table
+        operation: assert_empty
+        target:
+          column: 资金往来对象名称

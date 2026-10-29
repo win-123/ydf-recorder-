@@ -45,6 +45,30 @@ def resolve_menu_to_service_code(
         if _match_path(path, path_parts)
     ]
     if not matches:
+        # 精确后缀匹配失败 → 模糊兜底（按优先级）：
+        #   L0 叶子名原始值完全相等（保留「（财政）」等括号后缀区分）
+        #   L1 叶子名归一化相等（去空白/括号后缀/大小写）
+        #   L2 叶子名双向包含（适配环境间菜单改名/层级差异）
+        raw_leaf = path_parts[-1].strip()
+        leaf = _normalize_leaf(path_parts[-1])
+        all_paths = [(node, path) for node, path in _walk_menu_tree(tree, []) if path]
+        l0 = [(n, p) for n, p in all_paths if p[-1].strip() == raw_leaf]
+        l1 = [(n, p) for n, p in all_paths if not l0 and _normalize_leaf(p[-1]) == leaf]
+        l2 = [
+            (n, p)
+            for n, p in all_paths
+            if not l0 and not l1
+            and _leaf_contains(_normalize_leaf(p[-1]), leaf)
+        ]
+        candidates = l0 or l1 or l2
+        if len(candidates) == 1:
+            matches = candidates
+        elif len(candidates) > 1:
+            shown = [">>".join(p) for _, p in candidates[:8]]
+            raise ValueError(
+                f"菜单模糊匹配到多个候选，请用完整路径精确指定: {menu_path} | 候选: {shown}"
+            )
+    if not matches:
         _all = [">>".join(_p) for _, _p in _walk_menu_tree(tree, [])]
         raise ValueError(f"未找到菜单: {menu_path} | 菜单树共{len(_all)}个节点, 前10条: {_all[:10]}")
     if len(matches) > 1:
@@ -88,3 +112,19 @@ def _match_path(candidate_path: list[str], target_path: list[str]) -> bool:
     if len(candidate_path) < len(target_path):
         return False
     return candidate_path[-len(target_path):] == target_path
+
+
+def _normalize_leaf(name: str) -> str:
+    """菜单名归一化：去空白、去括号后缀（如「（财政）」）、转小写。"""
+    import re
+
+    text = (name or "").strip()
+    text = re.sub(r"[（(][^（()）]*[)）]\s*$", "", text)
+    return text.strip().lower()
+
+
+def _leaf_contains(candidate_leaf: str, target_leaf: str) -> bool:
+    """双向包含判断（两端非空且互为子串）。"""
+    if not candidate_leaf or not target_leaf:
+        return False
+    return candidate_leaf in target_leaf or target_leaf in candidate_leaf

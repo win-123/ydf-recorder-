@@ -1,0 +1,46 @@
+suite:
+  code: one_up_exp_budget_project_manager_tree_table_reference
+  name: 一上支出预算编制项目负责人树表参照
+  description: 新增一上支出项目时，通过项目负责人弹出参照内左树和右侧人员表选择负责人
+  tenant: 财政一体化
+  default_org: "101001"
+
+cases:
+  - code: fill-project-manager-reference
+    name: 选择项目负责人树表参照
+    user: 人员21
+    default_org: "101001"
+    steps:
+      - action: open_menu
+        menu_path: 预算编制>>部门预算编制>>一上预算编制>>一上支出预算编制
+
+      - component: tree
+        operation: select
+        target:
+          label: 101001 秘书处01
+
+      - component: tree
+        operation: select
+        target:
+          label: 001 支出项目分类001
+
+      - component: toolbar
+        operation: click
+        target:
+          label: 新增
+
+      - component: form
+        operation: fill
+        target:
+          fields:
+            项目名称: 项目负责人树表参照{{random.suffix}}
+            编报模版: 0002 支出模板
+            存续状态: 经常性
+            项目概述: "1"
+            项目负责人:
+              tree:
+                label: 101 综合司01
+              match:
+                column: 人员名称
+                equals: 人员二十一
+              confirm_label: 保存

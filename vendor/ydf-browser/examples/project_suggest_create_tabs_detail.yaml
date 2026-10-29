@@ -1,0 +1,102 @@
+suite:
+  code: project_suggest_create_tabs_detail
+  name: 项目建议新增页多页签和支出明细
+  description: 验证新增页 LCDTabs 页签切换、支出明细可编辑表格、附件上传和保存成功
+  tenant: 财政一体化
+cases:
+  - code: fill-detail-upload-attachments-save
+    name: 填写项目建议、支出明细和附件后保存
+    description: 附件内容不参与业务校验，三个审批要件类型各上传一个 Excel 后保存并在全部页签查询
+    user: 默认用户
+    default_org: "049002"
+    steps:
+      - action: open_menu
+        menu_path: 项目库>>项目建议>>项目建议
+
+      - component: tree
+        operation: select
+        target:
+          label: 001 办公室
+
+      - component: toolbar
+        operation: click
+        target:
+          label: 新增
+
+      - component: form
+        operation: fill
+        target:
+          fields:
+            项目类别: 3 特定目标类
+            项目名称: Codex项目建议多页签验证0501A
+            项目目录: "988988988"
+            项目分类: "1"
+            起始年度: "2026"
+            项目联系人: Codex
+            项目联系人电话: "13800000000"
+            项目建设内容: Codex项目建议新增页多页签与支出明细验证
+            备注: Codex自动化验证
+
+      - component: tab
+        operation: click
+        target:
+          label: 支出明细
+
+      - component: editable_table
+        operation: add_row
+        target:
+          label: 新增
+          table: 支出明细
+
+      - component: editable_table
+        operation: fill_row
+        target:
+          table: 支出明细
+          row_number: -1
+          fields:
+            支出明细: Codex支出明细
+            参数性能: Codex参数性能
+            数量: "1"
+            单位: 项
+            单价: "1"
+            测算数: "1"
+            备注信息: Codex明细备注
+
+      - component: tab
+        operation: click
+        target:
+          label: 附件信息
+
+      - component: attachment
+        operation: upload
+        target:
+          attachments:
+            - type: 询价
+              file: tmp/attachments/询价.xlsx
+            - type: 造价材料
+              file: tmp/attachments/造价材料.xlsx
+            - type: 评审报告
+              file: tmp/attachments/评审报告.xlsx
+
+      - component: toolbar
+        operation: click
+        target:
+          label: 保存
+
+      - component: tab
+        operation: click
+        target:
+          label: 全部
+
+      - component: query
+        operation: search
+        target:
+          conditions:
+            - field: 项目名称
+              equals: Codex项目建议多页签验证0501A
+
+      - component: table
+        operation: assert_column_values
+        target:
+          column: 项目名称
+          equals: Codex项目建议多页签验证0501A

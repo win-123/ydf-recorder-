@@ -1,0 +1,39 @@
+suite:
+  code: query_project_catalog_popup_reference
+  name: 申报项目模板设置项目目录查询参照
+  description: 申报项目模板设置中通过项目目录弹出参照执行单选和多选查询
+  tenant: 财政一体化
+  default_org: "101001"
+
+cases:
+  - code: query-project-catalog-single
+    name: 项目目录弹出参照单选查询
+    user: 默认用户
+    default_org: "101001"
+    steps:
+      - action: open_menu
+        menu_path: 预算绩效>>绩效模板>>申报项目模板设置
+
+      - component: query
+        operation: search
+        target:
+          conditions:
+            - field: 项目目录
+              equals: "101 财政一级"
+
+  - code: query-project-catalog-multiple
+    name: 项目目录弹出参照多选查询
+    user: 默认用户
+    default_org: "101001"
+    steps:
+      - action: open_menu
+        menu_path: 预算绩效>>绩效模板>>申报项目模板设置
+
+      - component: query
+        operation: search
+        target:
+          conditions:
+            - field: 项目目录
+              equals:
+                - "101 财政一级"
+                - "767 财务一级测试"

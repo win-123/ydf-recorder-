@@ -1,0 +1,51 @@
+# 真实回归环境基线（2026-08-20；仅作运行前核对，不参与 DSL 解析）
+# base_url: https://tv5-ydf.yonyougov.top
+# tenant: 财政一体化
+# user_alias: 15747894789
+# default_org: "101001"
+# expected: “采购供应商”参照关闭后恢复付款合同编辑模板，“合同付款计划”空表新增一行成功。
+# business_assertion: form.fill 报告 auto_restored_template=true，add_row 的 dataRowCount 从 0 变为 1。
+# data_impact: 用例不填写必填业务数据、不保存、不提交，不产生业务单据。
+#
+# Bug 现象: form.fill 选择“采购供应商”后，editable_table.add_row 报“表格名称未匹配”，候选仍是
+# 供应商参照模板的“表格”和“严重违法失信行为”，而付款合同编辑页实际可见“合同付款计划”。
+# 原因: form.fill 在选择后应用了已关闭参照的动态模板，但恢复入口不接受 form.fill 上下文；放开后，
+# 参照模板与父表单共用 qx_btn“取消”身份又被误判为参照仍可见，导致 stale manifest 未恢复。
+# 解决: 仅在本次实际应用 post-fill 动态模板时允许 form.fill 进入现有恢复判定，并忽略父子模板共享的
+# 稳定动作身份，继续以运行时可见性和非共享身份决定是否恢复。
+# fail-closed: 没有 post-fill 动态模板、参照仍有非共享前景稳定动作或父模板证据不足时均不恢复。
+# run: ./.venv/bin/python -m ydf_browser.cli run --dsl tests/real_cases/pay_contract_form_popup_parent_restore.yaml --headless
+
+suite:
+  code: real-regression-pay-contract-form-popup-parent-restore
+  name: 付款合同-表单参照父模板恢复真实回归
+  description: 验证采购供应商参照关闭后恢复付款合同编辑模板并新增付款计划行
+  tenant: 财政一体化
+  default_org: "101001"
+cases:
+  - code: pay-contract-form-popup-parent-restore
+    name: 采购供应商参照后新增合同付款计划
+    user: 15747894789
+    tags: [regression]
+    steps:
+      - action: open_menu
+        menu_path: 合同管理>>付款合同>>付款合同登记
+
+      - component: toolbar
+        operation: click
+        target:
+          label: 新增
+          sub_label: 政府采购合同
+
+      - component: form
+        operation: fill
+        target:
+          fields:
+            采购供应商:
+              first_available: true
+
+      - component: editable_table
+        operation: add_row
+        target:
+          label: 新增
+          table: 合同付款计划

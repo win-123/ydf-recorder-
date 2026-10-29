@@ -403,30 +403,35 @@ class RecorderRuntime:
         if not login_ok:
             self._page.goto(self.config.base_url, wait_until="domcontentloaded")
 
+        menu_failed = False
         if self._menu_path:
             try:
                 self._open_menu()
             except Exception as exc:
+                menu_failed = True
                 print(
                     f"[ydf-recorder] ⚠️ 打开菜单失败: {exc}，请手动导航到目标页面",
                     flush=True,
                 )
 
         # ★ 捕获开始前确保已离开登录页：自动登录失败时等待用户手动登录，
-        #   登录成功后重试打开菜单——登录页上的操作不会进入录制用例。
-        if self._wait_until_logged_in():
-            if self._menu_path:
-                try:
-                    self._open_menu()
-                except Exception as exc:
-                    print(
-                        f"[ydf-recorder] ⚠️ 登录后打开菜单失败: {exc}，"
-                        "请手动导航到目标页面",
-                        flush=True,
-                    )
-                    # 注入前等待用户到达业务页（设计器 DOM 特征 / /service/ URL），
-                    # 门户页上的手动导航操作不录入用例
-                    self._wait_for_business_page()
+        #   登录成功后重试打开菜单——登录页上的操作不会进入用例。
+        was_on_login = self._wait_until_logged_in()
+        if was_on_login and self._menu_path and menu_failed:
+            try:
+                self._open_menu()
+                menu_failed = False
+            except Exception as exc:
+                print(
+                    f"[ydf-recorder] ⚠️ 登录后打开菜单失败: {exc}，"
+                    "请手动导航到目标页面",
+                    flush=True,
+                )
+
+        # 菜单未打开（配置了菜单但失败）时：注入前等待用户到达业务页
+        # （设计器 DOM 特征 / /service/ URL），门户页上的手动导航操作不录入用例
+        if self._menu_path and menu_failed:
+            self._wait_for_business_page()
 
     def _looks_like_business_page(self) -> bool:
         """判断当前页是否已到达业务页（单据设计器页面）。

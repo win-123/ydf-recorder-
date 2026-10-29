@@ -1,0 +1,51 @@
+# 用法示例：运行前替换三处“示例单据编号”，并确认目标单据已审核；真实回归及业务回查见
+# tests/real_cases/material_stockin_workflow_panel_withdraw.yaml。
+suite:
+  code: workflow-panel-example
+  name: 工作流面板撤回审批
+  tenant: 示例租户
+  default_org: 示例组织
+cases:
+  - code: withdraw-approval
+    name: 显式执行工作流面板动作
+    steps:
+      - action: open_menu
+        menu_path: 易耗品物资 >> 入库登记 >> 入库审核
+      - component: tab
+        operation: click
+        target:
+          label: 已审核
+      - component: query
+        operation: search
+        target:
+          conditions:
+            - field: 单据编号
+              equals: 示例单据编号
+      - component: table_row_selection
+        operation: select
+        target:
+          match:
+            column: 单据编码
+            equals: 示例单据编号
+      - component: toolbar
+        operation: click
+        target:
+          label: 销审
+      - component: workflow_panel
+        operation: click
+        target:
+          label: 撤回审批
+      - component: dialog
+        operation: confirm
+        target:
+          label: 确定
+      - component: query
+        operation: search
+        target:
+          conditions:
+            - field: 单据编号
+              equals: 示例单据编号
+      - component: table
+        operation: assert_empty
+        target:
+          column: 单据编码

@@ -1,0 +1,43 @@
+# 由真实失败提取：新增页的延迟模板在通用点击前丢失，导致返回后绑定背景表格。
+# 不先填字段，直接打开参照，再断言新增页明细列；不保存、不提交。
+# 前置数据：当前年度和组织存在采购需求 CGXQ-000001，不自动替换业务数据。
+suite:
+  code: purchase-plan-reference-template-context
+  name: 采购计划直接打开参照后的明细上下文
+  description: 不保存；新增后先打开采购需求参照，验证后续明细属于新增页
+  tenant: 财政一体化
+  default_org: '101001'
+  fiscal_year: '2026'
+cases:
+- code: reference-then-detail-context
+  name: 参照返回后断言明细列
+  user: '15747894789'
+  tags:
+  - regression
+  steps:
+  - action: open_menu
+    menu_path: 采购管理>>采购计划>>采购计划编制
+  - component: toolbar
+    operation: click
+    target:
+      label: 新增
+      sub_label: 采购计划
+  - component: action
+    operation: click
+    target:
+      fieldid: btnSelDemand
+  - component: popup_reference
+    operation: select
+    target:
+      title: 选择采购需求
+      match:
+        column: 采购需求编号
+        equals: CGXQ-000001
+      confirm: true
+  - component: table
+    operation: assert_columns
+    target:
+      table: 计划明细
+      present:
+      - 采购项目
+      - 采购标的

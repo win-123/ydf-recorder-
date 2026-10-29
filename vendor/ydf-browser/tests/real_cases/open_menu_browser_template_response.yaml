@@ -1,0 +1,32 @@
+# 真实回归环境基线（2026-08-28；仅作运行前核对，不参与 DSL 解析）
+# base_url: https://tv5-ydf.yonyougov.top
+# tenant: 财政一体化
+# user_alias: 15747894789
+# default_org: "101001"
+# menu_path: 合同管理>>合同审核>>合同审核
+# expected: open_menu 直接打开 service 路由，使用页面实际模板响应完成 manifest 构建、工作面等待和绑定。
+# data_impact: 仅打开菜单并断言列表列，不查询、不选择、不审核、不保存，不产生业务数据变更。
+# regression: 旧实现会在浏览器打开前独立获取服务详情和 matchingTemplate，页面随后重复请求同一信息。
+# run: ./.venv/bin/python -m ydf_browser.cli run --dsl tests/real_cases/open_menu_browser_template_response.yaml --headless --performance
+
+suite:
+  code: real-regression-open-menu-browser-template-response
+  name: 打开菜单复用页面模板响应真实回归
+  description: 验证单据菜单无需前置模板请求即可完成首次工作面等待和运行时绑定
+  tenant: 财政一体化
+  default_org: "101001"
+cases:
+  - code: open-menu-browser-template-response
+    name: 页面模板响应完成合同审核列表绑定
+    user: 15747894789
+    tags: [regression, performance]
+    steps:
+      - action: open_menu
+        menu_path: 合同管理>>合同审核>>合同审核
+
+      - component: table
+        operation: assert_columns
+        target:
+          present:
+            - 合同编号
+            - 合同名称

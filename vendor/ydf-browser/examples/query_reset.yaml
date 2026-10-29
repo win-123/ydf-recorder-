@@ -1,0 +1,30 @@
+suite:
+  code: query_reset
+  name: 查询区重置
+  description: 单位资金收入确认未确认页签先设置付款人账号条件，再恢复查询区初始状态
+  tenant: 财政一体化
+  default_org: "101001"
+
+cases:
+  - code: reset-payer-account-filter
+    name: 重置付款人账号查询条件
+    user: 默认用户
+    steps:
+      - action: open_menu
+        menu_path: 收入预算执行>>单位资金收入>>单位资金收入确认
+
+      - component: tab
+        operation: click
+        target:
+          label: 未确认
+
+      - component: query
+        operation: search
+        target:
+          conditions:
+            - field: 付款人账号
+              equals: ydf-browser-reset-check
+
+      - component: query
+        operation: reset
+        target: {}

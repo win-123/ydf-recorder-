@@ -1,0 +1,74 @@
+# 目标项目须未细化且查询结果唯一，其关联三级项目须已完成细化终审。
+# 验证采购明细确认不误点被遮挡的父页面同名动作，回读父表单后取消。
+# 数据影响：沿用目标项目进入细化、编辑采购信息；本用例不保存、不提交。
+# run: ./.venv/bin/python -m ydf_browser.cli run --dsl tests/real_cases/budget_procurement_detail_confirm.yaml --env <环境名称> --headless
+suite:
+  code: real-budget-procurement-detail-confirm
+  name: 二上二级项目细化-采购明细确认回归
+  tenant: 自动化内控
+cases:
+  - code: budget-procurement-detail-confirm
+    name: 前景明细确认及父表单回读
+    user: "15500100142"
+    default_org: 255001
+    tags: [regression]
+    steps:
+      - action: open_menu
+        menu_path: 预算编制>>部门预算编制>>二上预算编制>>二上二级项目细化
+      - component: query
+        operation: search
+        target:
+          conditions:
+            - field: 项目名称
+              equals: 二级项目名称
+      - component: table_row_selection
+        operation: select
+        target:
+          match:
+            column: 项目名称
+            equals: 二级项目名称
+      - component: toolbar
+        operation: click
+        target:
+          label: 细化
+      - component: toolbar
+        operation: click
+        target:
+          label: 确认
+      - component: tab
+        operation: click
+        target:
+          label: 政府采购信息
+      - component: toolbar
+        operation: click
+        target:
+          label: 生成政府采购项目
+      - component: toolbar
+        operation: click
+        target:
+          label: 新增
+      - component: editable_table
+        operation: fill_row
+        target:
+          table: 202308011705585050848856373843_table
+          row_number: 1
+          fields:
+            任务明细: 任务明细1
+      - component: toolbar
+        operation: click
+        target:
+          label: 确定
+      - component: form
+        operation: fill
+        target:
+          fields:
+            政府采购项目名称: 采购明细确认回归
+      - component: form
+        operation: assert_values
+        target:
+          fields:
+            政府采购项目名称: 采购明细确认回归
+      - component: toolbar
+        operation: click
+        target:
+          label: 取消
