@@ -1,94 +1,97 @@
-# 桌面应用方案：内嵌 Chromium 的 ydf-recorder 桌面形态
+# 桌面应用方案：自包含 DMG / exe，双击即用（v2）
 
-> 评估结论：**可行，已实现方案 B 的本机自用版**。
-> 关键前提：ydf-recorder 本来就通过 Playwright 使用**内置 Chromium**（持久化
-> profile 模式），不依赖系统 Chrome——"内嵌浏览器"天然存在，桌面化的核心
-> 是**包装与分发**，而不是重写。
+> **目标**：给完全不会装环境的同事用 —— 拿到 DMG（macOS）/ 压缩包（Windows），
+> 解压/拖入应用目录，**双击即录，机器上不需要 Python、pip、任何开发环境**。
+>
+> 实现方式：PyInstaller 把 Python 解释器 + 全部依赖（含 Playwright 的 node
+> driver）静态打包，内置 Chromium 目录随包分发，配置模板首次启动自动落位。
 
-## 一、当前最简安装方式（无需桌面应用）
+## 一、构建（仅构建机需要 Python 3.11+，使用者不需要）
 
-```bash
-# 一键安装（录制 + 内置 Chromium）
-bash scripts/install.sh
-
-# 需要回放功能时
-bash scripts/install.sh --full
-```
-
-手动等价步骤：
+### macOS（产物：.app + DMG）
 
 ```bash
-python3 -m venv ~/.ydf-recorder/venv
-~/.ydf-recorder/venv/bin/pip install <ydf-recorder 项目目录>
-~/.ydf-recorder/venv/bin/python -m playwright install chromium   # 约 150MB，一次性
-# 回放（可选）：
-~/.ydf-recorder/venv/bin/ydf-recorder install-ydf-browser --with-browsers
+bash desktop/build_app.sh                 # 完整构建（含 Chromium 下载约 150MB）
+# 或已下载过浏览器时：
+bash desktop/build_app.sh --skip-browsers
 ```
 
-要求：Python 3.11+。macOS / Linux / Windows 均可（脚本目前按 macOS/zsh 编写）。
+产物：
 
-## 二、桌面应用可行性评估
+```
+dist/YonDiF Recorder.app        ← 自包含应用，拷贝即用
+dist/YonDiF-Recorder.dmg        ← 分发镜像
+```
 
-| 方案 | 做法 | 结论 |
-|---|---|---|
-| **A. Electron + Python sidecar** | Electron 自带 Chromium 渲染目标页，`webContents.debugger` 走裸 CDP，Python 打包为 sidecar 进程做转换/回放 | ❌ 不推荐。两份 Chromium（Electron + 回放 Playwright）、`cdp.py` 需全部重写为裸 CDP（丢失 Playwright 的 frame 遍历 / expose_function / persistent context 封装）、双栈打包、内存翻倍 |
-| **B. Playwright 内嵌 Chromium + 应用打包（已实现）** | 目标页窗口 + 检查器窗口本来就跑在内置 Chromium 里；把 Python 运行时 + Chromium + 配置打进一个 `.app`，双击即录 | ✅ 零重写；录制与回放全部在内部；本机自用版当天可用 |
-| **C. pywebview / Tauri** | 使用系统 WebView（macOS 是 WKWebView） | ❌ 不可行：非 Chromium 内核、无 CDP，RECORDER_JS 注入与事件采集机制失效 |
-
-### 方案 B 的形态
+应用结构：
 
 ```
 YonDiF Recorder.app/
-├── Contents/MacOS/launcher           ← 双击入口：拉起录制会话
+├── Contents/MacOS/launcher            ← 双击入口（首次自动生成用户配置）
+├── Contents/MacOS/app/                ← PyInstaller 打包的 recorder（含 Python 运行时）
 └── Contents/Resources/
-    ├── venv/                          ← 独立 Python 运行时 + ydf-recorder
-    ├── chromium/                      ← Playwright 内置 Chromium（所有页面操作都在这里）
+    ├── chromium/                       ← 内置浏览器，所有页面操作都在这里
+    ├── config/env.yaml                 ← 配置模板
     └── version.txt
 ```
 
-- **所有操作都在内部进行**：登录、页面操作、检查器（Stop/Pause/实时 YAML 预览）
-  全部跑在打包的 Chromium 中；唯一的外部依赖是操作系统本身。
-- 录制结果输出到 `~/Downloads/ydf-recordings/`，日志在 `~/.ydf-recorder-app.log`。
-- 浏览器 profile 内置于 Playwright 默认目录（持久化登录态）。
+### Windows（产物：绿色文件夹，zip 分发）
 
-## 三、使用
+在构建机上执行（构建机需装 Python 3.11+）：
 
-```bash
-# 构建（完整版，含 Chromium 下载约 150MB）
-bash desktop/build_app.sh
-
-# 已下载过浏览器时增量重建
-bash desktop/build_app.sh --skip-browsers
-
-# 安装到应用目录
-cp -R "dist/YonDiF Recorder.app" /Applications/
-
-# 传递额外参数（与 CLI 相同，如指定菜单路径）
-open "/Applications/YonDiF Recorder.app" --args --menu-path "项目管理>>项目库>>项目建议"
+```bat
+desktop\build_windows.bat
 ```
 
-回放功能首次使用前，在 .app 内构建回放运行时：
+产物 `dist\YonDiF-Recorder-windows\`，**zip 整个文件夹发给同事**：
 
-```bash
-APP="/Applications/YonDiF Recorder.app"
-PLAYWRIGHT_BROWSERS_PATH="$APP/Contents/Resources/chromium" \
-  "$APP/Contents/Resources/venv/bin/ydf-recorder" install-ydf-browser --with-browsers
+```
+YonDiF-Recorder-windows/
+├── app/YonDiFRecorder.exe     ← 双击即录
+├── YonDiFRecorder-user.bat    ← （推荐）自动配置路径 + 输出目录的启动器
+├── chromium/                  ← 内置浏览器
+└── config/env.yaml            ← 配置模板
 ```
 
-## 四、限制与后续演进
+## 二、使用者视角（全部步骤）
+
+1. 解压 DMG / zip，把应用拖到「应用程序」（macOS）或放任意目录（Windows）。
+2. 首次双击会自动生成配置模板 `~/.ydf-recorder/env.yaml`
+   （Windows: `%USERPROFILE%\.ydf-recorder\env.yaml`），填入：
+   ```yaml
+   environments:
+     ydf:
+       base_url: http://<服务器地址>
+       username: <账号>        # 可选，不填则手动登录
+       password: <密码>
+   ```
+3. 再次双击 → 自动打开内置 Chromium（登录 + 目标页面都在里面操作），
+   录制结果输出到 `~/Downloads/ydf-recordings/suite_<时间戳>.yaml`。
+4. 运行日志：`~/.ydf-recorder-app.log`。
+
+## 三、为什么是这个方案（评估结论）
+
+| 方案 | 结论 |
+|---|---|
+| **A. Electron + Python sidecar** | ❌ 两份 Chromium（Electron + 回放 Playwright）、cdp.py 全部重写为裸 CDP、双栈打包 |
+| **B. Playwright 内置 Chromium + PyInstaller（已实现）** | ✅ recorder 本来就运行在 Playwright 内置 Chromium 中，"内嵌浏览器"天然存在；PyInstaller 解决"免安装" |
+| **C. pywebview / Tauri** | ❌ 系统 WebView 非 Chromium 内核、无 CDP，注入机制失效 |
+
+关键事实：recorder 的录制（目标窗口 + 检查器窗口）与回放全部运行在
+Playwright 内置 Chromium 里，**使用者机器上不需要装 Chrome**。
+
+## 四、已知限制
 
 | 事项 | 说明 |
 |---|---|
-| 本机自用 | v1 的 venv 依赖系统 Python 符号链接，**仅保证构建机可用**；跨机分发需走 PyInstaller（见下） |
-| 分发版（v2） | `pyinstaller --onedir` 打包 Python（需在 datas 中带上 playwright driver 目录与 ydf_recorder 资源），Chromium 目录外置随包分发；macOS 需签名/公证 |
-| 图标 | 当前无自定义 icns，可在 Info.plist 加 `CFBundleIconFile` |
-| 多环境 | launcher 默认 `--env ydf`，可通过 `open --args` 覆盖 |
-| Windows | 结构同理（.app → 目录 + start.bat / pyinstaller），脚本待移植 |
+| macOS Gatekeeper | 未签名/公证的 app 首次打开需右键 →「打开」，或 `xattr -cr "/Applications/YonDiF Recorder.app"`；正式分发建议 Apple Developer 签名 + 公证 |
+| Windows SmartScreen | 未签名 exe 同理，点「仍要运行」 |
+| 回放功能 | v2 包内暂未内置 ydf-browser 回放运行时（构建它需要 ydf-browser 源码目录）；需要回放的机器走 `install-ydf-browser` 开发形态，或后续把预构建 runtime 一并打进包 |
+| 配置分发 | env.yaml 含账号密码，不要把填好的配置打进分发包；统一由使用者自己填写 |
+| 浏览器版本 | Chromium 随包固定；升级 recorder 时重新构建即可 |
 
-## 五、为什么不选 Electron（补充说明）
+## 五、v1（venv 方案）说明
 
-录制器的全部能力（CDP 注入、frame 事件采集、实时 YAML、回放）都建立在
-Playwright API 之上；Electron 只能通过 `webContents.debugger` 提供裸 CDP，
-等价于放弃 cdp.py 的全部封装重写一遍，而收益仅是"界面用 HTML 写"——
-但检查器窗口本来就是 HTML，已经在 Chromium 里。**Electron 在这个场景是
-纯负资产**。
+v1 用「独立 venv 打进 .app」实现，同样零依赖但依赖构建机的 Python 小版本
+兼容性；v2 的 PyInstaller 形态完全自包含，v1 脚本已被替换。若要回退查看，
+见 git 历史（a50485b..7477fc2）。

@@ -215,10 +215,54 @@ def _make_popup_synthetic(
     )
 
 
+def _is_login_page_event(event: RecordedEvent) -> bool:
+    """判断事件是否发生在登录页。
+
+    登录由运行时根据 env 配置内置完成（ydf-browser DSL 也没有 login 动作），
+    登录页上的表单填写/点击不应进入业务用例——否则会把明文密码写进 YAML。
+
+    判定标准（保守，避免误伤业务页）：
+      - page_url 含 ``/cas``、``login``（CAS/轻量登录页）；
+      - page_title 为「欢迎登录」（YonBIP 登录页标题）。
+    """
+    url = (event.context.url or "").lower()
+    if "/cas" in url or "login" in url:
+        return True
+    title = (event.context.title or "").strip()
+    return title == "欢迎登录"
+
+
+def _drop_pre_service_noise(
+    events: list[RecordedEvent], has_open_menu: bool
+) -> list[RecordedEvent]:
+    """丢弃到达第一个业务页（/service/）之前的导航噪音事件。
+
+    仅在用例带 ``open_menu`` 首步骤时生效：回放时 open_menu 直达业务页，
+    业务页打开之前的门户点击无法回放。若整个事件流都不含 ``/service/``
+    URL（业务页 URL 形态不同），则保守起见保留全部事件。
+    """
+    if not has_open_menu:
+        return events
+    first_service = next(
+        (i for i, e in enumerate(events) if "/service/" in (e.context.url or "")),
+        None,
+    )
+    if first_service is None or first_service == 0:
+        return events
+    dropped = len(events[:first_service])
+    print(
+        f"[ydf-recorder] 已过滤 {dropped} 条到达业务页前的导航事件"
+        "（open_menu 回放时直达业务页）",
+        flush=True,
+    )
+    return events[first_service:]
+
+
 def convert_events_to_steps(
     events: list[RecordedEvent],
     abstract: bool = False,
     auto_capture: bool = False,
+    has_open_menu: bool = False,
 ) -> list[dict[str, Any]]:
     """将录制事件列表转换为 DSL 步骤 dict 列表。
 
@@ -239,6 +283,21 @@ def convert_events_to_steps(
     # 预处理（P1-5）：将文件选择 change 事件的文件名回填到前序上传按钮点击，
     # 供 upload 构建器生成带文件名的占位符（必须在任何事件过滤前执行）
     events = _backfill_upload_filenames(events)
+
+    # 预处理：丢弃登录页事件（登录由运行时 env 内置完成，见 _is_login_page_event）
+    login_dropped = [e for e in events if _is_login_page_event(e)]
+    if login_dropped:
+        print(
+            f"[ydf-recorder] 已过滤 {len(login_dropped)} 条登录页事件"
+            "（登录由运行时自动完成，不录入用例）",
+            flush=True,
+        )
+        events = [e for e in events if not _is_login_page_event(e)]
+
+    # 预处理：带 open_menu 首步骤时，丢弃「到达业务页（/service/）之前」的
+    # 导航噪音（门户页点菜单等）——回放时 open_menu 直达业务页，这些步骤
+    # 在业务页上没有对应控件，必然失败。
+    events = _drop_pre_service_noise(events, has_open_menu=has_open_menu)
 
     # 预处理：将「点击表单参照字段 → 选择树节点」转为合成的 form change 事件，
     # 并过滤表单输入框的聚焦点击
@@ -1692,9 +1751,14 @@ def build_dsl_document(
     auto_capture: bool = False,
 ) -> DslDocument:
     """从录制会话构建完整的 DSL 文档（suite + cases）。"""
-    steps = convert_events_to_steps(session.events, abstract=abstract, auto_capture=auto_capture)
-
     menu_path = session.menu_path or extract_menu_path(session.events)
+
+    steps = convert_events_to_steps(
+        session.events,
+        abstract=abstract,
+        auto_capture=auto_capture,
+        has_open_menu=bool(menu_path),
+    )
 
     case_steps: list[dict[str, Any]] = []
     if menu_path:
@@ -1704,10 +1768,15 @@ def build_dsl_document(
 
     suite_code = session.suite_code or "recorded_suite"
     suite_name = session.suite_name or "录制测试集"
+    suite_description = session.suite_description or (
+        "录制生成。登录由运行时根据环境配置自动完成（DSL 无 login 动作）；"
+        "首步骤 open_menu 显式打开业务菜单，之后的步骤均为页面业务操作。"
+    )
 
     suite = DslTestSuite(
         code=suite_code,
         name=suite_name,
+        description=suite_description,
         tenant=session.tenant,
         default_org=session.default_org,
         fiscal_year=session.fiscal_year,

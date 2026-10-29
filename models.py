@@ -158,6 +158,7 @@ class RecordingSession:
 
     suite_code: str = ""
     suite_name: str = ""
+    suite_description: str = ""
     tenant: str = ""
     default_org: str = ""
     fiscal_year: str = ""

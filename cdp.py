@@ -412,6 +412,99 @@ class RecorderRuntime:
                     flush=True,
                 )
 
+        # ★ 捕获开始前确保已离开登录页：自动登录失败时等待用户手动登录，
+        #   登录成功后重试打开菜单——登录页上的操作不会进入录制用例。
+        if self._wait_until_logged_in():
+            if self._menu_path:
+                try:
+                    self._open_menu()
+                except Exception as exc:
+                    print(
+                        f"[ydf-recorder] ⚠️ 登录后打开菜单失败: {exc}，"
+                        "请手动导航到目标页面",
+                        flush=True,
+                    )
+                    # 注入前等待用户到达业务页（设计器 DOM 特征 / /service/ URL），
+                    # 门户页上的手动导航操作不录入用例
+                    self._wait_for_business_page()
+
+    def _looks_like_business_page(self) -> bool:
+        """判断当前页是否已到达业务页（单据设计器页面）。
+
+        两个信号任一满足即可：
+          - URL 含 ``/service/``（常规环境 SPA 路由）；
+          - DOM 中存在单据设计器渲染的 ``wx-`` 元素（URL 不变的环境）。
+        """
+        try:
+            url = (self._page.url or "").lower()
+            if "/service/" in url:
+                return True
+            return self._page.query_selector(
+                '[id^="wx-"],[class*="wx-"]'
+            ) is not None
+        except Exception:
+            return False
+
+    def _wait_for_business_page(self) -> bool:
+        """等待用户手动导航到业务页；返回是否等到。最多 10 分钟。"""
+        print(
+            "[ydf-recorder] ⏳ 等待手动导航到目标业务页面"
+            "（到达后录制自动开始，导航过程不录入用例）…",
+            flush=True,
+        )
+        deadline = time.time() + 600
+        while time.time() < deadline:
+            if self._looks_like_business_page():
+                print("[ydf-recorder] 已到达业务页，开始录制", flush=True)
+                return True
+            time.sleep(2)
+        print("[ydf-recorder] ⚠️ 等待业务页超时，照常开始录制", flush=True)
+        return False
+
+    def _wait_until_logged_in(self) -> bool:
+        """等待浏览器离开登录页，返回是否发生了「登录页 → 已登录」的跳转。
+
+        判定标准（与 ``_try_reuse_session`` 一致）：
+          - URL 不含 ``/cas`` / ``login``；
+          - 页面中不存在密码输入框（排除 URL 正常但停在登录表单的变体）。
+
+        最多等待 10 分钟；超时则放弃等待（照常开始录制，仅提示）。
+        """
+        deadline = time.time() + 600
+        warned = False
+        waited = False
+        while True:
+            try:
+                url = (self._page.url or "").lower()
+            except Exception:
+                return waited
+            on_login = "/cas" in url or "login" in url
+            if not on_login:
+                try:
+                    has_login_form = (
+                        self._page.query_selector("input[type='password']")
+                        is not None
+                    )
+                except Exception:
+                    has_login_form = False
+                if not has_login_form:
+                    return waited  # 已在业务页
+            if not warned:
+                print(
+                    "[ydf-recorder] ⚠️ 当前在登录页，请在浏览器中完成登录，"
+                    "登录后录制将自动开始（登录操作不会录入用例）",
+                    flush=True,
+                )
+                warned = True
+            if time.time() >= deadline:
+                print(
+                    "[ydf-recorder] ⚠️ 等待登录超时（10 分钟），照常开始录制",
+                    flush=True,
+                )
+                return waited
+            waited = True
+            time.sleep(2)
+
     def _try_reuse_session(self) -> bool:
         """持久化模式下尝试复用上次保存的登录态。
 
