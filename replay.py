@@ -35,6 +35,8 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import yaml
+
 # 本文件位于仓库根（package-dir 把根目录映射为 ydf_recorder 包）
 RECORD_ROOT = Path(__file__).resolve().parent
 RUNTIME_DIR = RECORD_ROOT / ".ydf-browser-runtime"
@@ -75,6 +77,7 @@ class ReplayOptions:
     grep: str | None = None
     tags: list[str] = field(default_factory=list)
     vars_files: list[str] = field(default_factory=list)
+    var_overrides: list[str] = field(default_factory=list)  # --var KEY=VALUE
     no_persistent_profile: bool = False
 
 
@@ -307,6 +310,8 @@ def build_run_args(options: ReplayOptions) -> list[str]:
         args += ["--tag", tag]
     for vf in options.vars_files:
         args += ["--vars-file", vf]
+    for kv in options.var_overrides:
+        args += ["--var", kv]
     if options.no_persistent_profile:
         args.append("--no-persistent-profile")
     return args
@@ -327,6 +332,8 @@ def build_validate_args(options: ReplayOptions) -> list[str]:
         args += ["--tag", tag]
     for vf in options.vars_files:
         args += ["--vars-file", vf]
+    for kv in options.var_overrides:
+        args += ["--var", kv]
     return args
 
 
@@ -455,6 +462,183 @@ def run_validate(options: ReplayOptions, summary_only: bool = False) -> tuple[in
     return proc.returncode, summary
 
 
+# ── DSL 菜单路径规范化（回放自愈）──────────────────────────
+#
+# 回放端 ``ydf_browser.gateway.resolve_menu`` 对菜单路径是**后缀精确匹配**：
+# DSL 里少一层、多一层、或带界面 Tab 名（如「预算管理>>项目库>>…」）都会直接
+# 报「未找到菜单」。录制器现在写的是菜单树规范路径，但历史/手写 YAML 仍可能
+# 不匹配，所以在回放前按菜单树做一次校正，把 menu_path 改写成真实路径。
+
+_MENU_PATH_LINE_RE = re.compile(
+    r"^(?P<prefix>[ \t]*(?:-[ \t]+)?menu_path[ \t]*:[ \t]*)(?P<value>.*?)(?P<suffix>[ \t]*)$",
+    re.MULTILINE,
+)
+
+
+def _unquote(value: str) -> str:
+    text = (value or "").strip()
+    if len(text) >= 2 and text[0] == text[-1] and text[0] in ("'", '"'):
+        return text[1:-1]
+    return text
+
+
+def _format_menu_path(value: str, original: str) -> str:
+    """按原行是否带引号决定新值的书写形式，尽量保持 YAML 风格不变。"""
+    raw = (original or "").strip()
+    if len(raw) >= 2 and raw[0] == raw[-1] and raw[0] in ("'", '"'):
+        return f"{raw[0]}{value}{raw[0]}"
+    return value
+
+
+def extract_menu_paths(text: str) -> list[str]:
+    """取出 DSL 文本里所有 ``menu_path`` 值（去重、保持出现顺序）。"""
+    seen: list[str] = []
+    for match in _MENU_PATH_LINE_RE.finditer(text):
+        value = _unquote(match.group("value"))
+        if value and value not in seen:
+            seen.append(value)
+    return seen
+
+
+def rewrite_menu_paths(text: str, canonical: dict[str, str]) -> tuple[str, list[tuple[str, str]]]:
+    """把 DSL 文本里的 menu_path 值替换为规范路径（纯函数，便于测试）。"""
+    changes: list[tuple[str, str]] = []
+
+    def _replace(match: re.Match[str]) -> str:
+        raw = match.group("value")
+        key = _unquote(raw)
+        new = canonical.get(key)
+        if not new or new == key:
+            return match.group(0)
+        changes.append((key, new))
+        return match.group("prefix") + _format_menu_path(new, raw) + match.group("suffix")
+
+    return _MENU_PATH_LINE_RE.sub(_replace, text), changes
+
+
+def _normalized_output_path(yaml_path: str) -> Path:
+    src = Path(yaml_path)
+    candidate = src.with_name(f"{src.stem}.normalized.yaml")
+    try:
+        if os.access(candidate.parent, os.W_OK):
+            return candidate
+    except OSError:
+        pass
+    return _replay_workdir() / candidate.name
+
+
+def normalize_dsl_menu_paths(
+    yaml_path: str,
+    *,
+    config_path: str | None = None,
+    env_name: str = "ydf",
+    output_path: Path | None = None,
+) -> tuple[str, list[tuple[str, str]]]:
+    """按菜单树校正 ``menu_path`` 并剔除重复填写噪音。
+
+    返回 ``(实际用于回放的 YAML 路径, [(旧路径, 新路径), ...])``。
+    任何一步失败（未配置账号、登录失败、菜单树不可达）都**不改动**，
+    原样返回入参路径，保证回放行为不被拖累。
+    """
+    try:
+        text = Path(yaml_path).read_text(encoding="utf-8")
+    except OSError:
+        return yaml_path, []
+
+    try:
+        from .converter import dedupe_repeated_fills
+        from .auth import apply_context, login
+        from .config import load_recorder_env
+        from .menu import fetch_menu_tree, resolve_menu_target
+
+        # 先做本地可完成的去重（不需要登录/网络）
+        doc = yaml.safe_load(text)
+        dedup_applied = False
+        if isinstance(doc, dict):
+            for case in doc.get("cases") or []:
+                if not isinstance(case, dict):
+                    continue
+                old_steps = case.get("steps")
+                if isinstance(old_steps, list):
+                    new_steps = dedupe_repeated_fills(old_steps)
+                    if new_steps is not old_steps and new_steps != old_steps:
+                        case["steps"] = new_steps
+                        dedup_applied = True
+
+        env = load_recorder_env(config_path, env_name)
+        if not (env.username and env.password):
+            if not dedup_applied:
+                return yaml_path, []
+            # 只有去重改动时也要写出，但跳过菜单树
+            payload = None
+        else:
+            result = login(env)
+            # 与录制端一致：先切到目标租户/组织/年度，否则菜单树是默认上下文的那棵，
+            # 目标菜单可能根本不存在。
+            try:
+                result = apply_context(
+                    env,
+                    result,
+                    tenant_name=env.tenant,
+                    default_org=env.default_org,
+                    fiscal_year=env.fiscal_year,
+                )
+            except Exception as exc:  # noqa: BLE001 — 上下文切换失败仍可用默认上下文试一次
+                print(
+                    f"[ydf-recorder] warn: 菜单路径校正时上下文切换失败（{exc}），沿用当前上下文",
+                    file=sys.stderr,
+                )
+            payload = fetch_menu_tree(env, result.session)
+    except Exception as exc:  # noqa: BLE001 — 自愈失败不应中断回放
+        print(
+            f"[ydf-recorder] warn: 菜单路径规范化跳过（登录/菜单树不可用: {exc}）",
+            file=sys.stderr,
+        )
+        return yaml_path, []
+
+    changes: list[tuple[str, str]] = []
+
+    # 1) menu_path 校正
+    if payload is not None:
+        canonical: dict[str, str] = {}
+        for path in extract_menu_paths(text):
+            try:
+                resolution = resolve_menu_target(payload, path)
+            except Exception:  # noqa: BLE001 — 解析不到就沿用原值
+                continue
+            if resolution.path and resolution.path != path:
+                canonical[path] = resolution.path
+        if canonical and isinstance(doc, dict):
+            for case in doc.get("cases") or []:
+                if not isinstance(case, dict):
+                    continue
+                for step in case.get("steps") or []:
+                    if isinstance(step, dict) and step.get("action") == "open_menu":
+                        old = str(step.get("menu_path") or "")
+                        new = canonical.get(old)
+                        if new:
+                            step["menu_path"] = new
+                            changes.append((old, new))
+
+    if not changes and not dedup_applied:
+        return yaml_path, []
+
+    target = output_path or _normalized_output_path(yaml_path)
+    try:
+        dumped = yaml.safe_dump(
+            doc,
+            allow_unicode=True,
+            sort_keys=False,
+            default_flow_style=False,
+            width=10_000,
+        )
+        target.write_text(dumped, encoding="utf-8")
+    except (OSError, yaml.YAMLError) as exc:
+        print(f"[ydf-recorder] warn: 规范化 YAML 写入失败，沿用原文件: {exc}", file=sys.stderr)
+        return yaml_path, []
+    return str(target), changes
+
+
 def _replay_workdir() -> Path:
     """回放子进程的工作目录（ydf-browser 会在 ./reports/ 下写报告）。
 
@@ -536,6 +720,7 @@ def _options_from_args(args, yaml_path: str) -> ReplayOptions:
         grep=getattr(args, "grep", None),
         tags=list(getattr(args, "tag", None) or []),
         vars_files=list(getattr(args, "vars_file", None) or []),
+        var_overrides=list(getattr(args, "var", None) or []),
         no_persistent_profile=getattr(args, "no_persistent_profile", False),
     )
 
@@ -591,6 +776,17 @@ def handle_replay(args) -> int:
     version_warn = check_runtime_version()
     if version_warn:
         print(f"[ydf-recorder] warn: {version_warn}", file=sys.stderr)
+    if getattr(args, "normalize_menu", True):
+        config = resolve_config_path(getattr(args, "config", None))
+        yaml_path, changes = normalize_dsl_menu_paths(
+            yaml_path,
+            config_path=str(config) if config else None,
+            env_name=getattr(args, "env", "ydf"),
+        )
+        if changes:
+            for old, new in changes:
+                print(f"[ydf-recorder] replay: menu_path 校正 {old} → {new}", file=sys.stderr)
+            print(f"[ydf-recorder] replay: 使用规范化后的 DSL → {yaml_path}", file=sys.stderr)
     code, summary = run_replay(_options_from_args(args, yaml_path), summary_only=args.summary_only)
     if summary is None:
         print("[ydf-recorder] replay: 未解析到结果摘要（可能中途失败，见上方输出）", file=sys.stderr)

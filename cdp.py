@@ -260,6 +260,7 @@ class RecorderRuntime:
         self._event_store: dict[tuple, dict[str, Any]] = {}   # 事件去重存储，key 见 _event_key
         self._frame_watermarks: dict[int, int] = {}           # 每个 frame 已采集到的最大 seq
         self._service_code: str = ""  # 菜单解析得到的 serviceCode
+        self._resolved_menu_path: str = ""  # 菜单树中的规范路径（写入 DSL）
         self._api_session = None  # requests.Session for API calls (aligned with ydf-browser)
         # 持久化模式标记
         self._is_persistent = (self._browser_mode == "builtin")
@@ -655,7 +656,7 @@ class RecorderRuntime:
         确保携带正确的登录态 cookies。再用 ``menu.resolve_menu_to_service_code``
         正向解析中文路径 -> serviceCode，最后导航到 ``/#/service/{serviceCode}``。
         """
-        from .menu import build_service_url, resolve_menu_to_service_code
+        from .menu import build_service_url, resolve_menu_target
         from .menu_resolver import _walk_menu_tree
         from .menu import _unwrap_payload
         from urllib.parse import urljoin
@@ -699,14 +700,27 @@ class RecorderRuntime:
                 for _p in _fuzzy[:20]:
                     print(f"  -> {_p}", flush=True)
 
-        service_code = resolve_menu_to_service_code(payload, self._menu_path)
+        resolution = resolve_menu_target(payload, self._menu_path)
+        service_code = resolution.service_code
         self._service_code = service_code
+        # ★ 关键：DSL 里要写菜单树中的**完整**路径，而不是用户手填的路径。
+        # 用户常按界面层级填写（如「预算管理>>项目库>>一级项目管理（财政）」），
+        # 实际菜单树是「项目库>>一级项目>>一级项目管理（财政）」。回放端
+        # ydf_browser.gateway.resolve_menu 是后缀精确匹配，路径不完整会直接
+        # 报「未找到菜单」。
+        self._resolved_menu_path = resolution.path
         service_url = build_service_url(self.config.base_url, service_code)
         print(
             f"[ydf-recorder] 菜单解析: {self._menu_path} -> "
             f"serviceCode={service_code}",
             flush=True,
         )
+        if resolution.path and resolution.path != self._menu_path:
+            print(
+                f"[ydf-recorder] 菜单路径已规范化为菜单树真实路径: "
+                f"{resolution.path}（匹配方式: {resolution.matched_by}）",
+                flush=True,
+            )
 
         # ★ 与 ydf-browser 对齐：打开菜单前重新注入最新 cookies，
         # 避免首页导航后 cookies 过期/被服务端刷新导致服务页跳回登录
@@ -1114,6 +1128,16 @@ class RecorderRuntime:
     def collect_events(self) -> list[dict[str, Any]]:
         """直接获取当前已捕获的事件（不等待停止）。"""
         return self._capture_events()
+
+    @property
+    def resolved_menu_path(self) -> str:
+        """录制时实际打开的菜单在菜单树中的规范路径（``>>`` 分隔）。
+
+        该路径与 ``ydf_browser.gateway.resolve_menu`` 的精确匹配对齐，
+        DSL 的 ``open_menu.menu_path`` 必须用它，否则回放会「未找到菜单」。
+        未解析菜单时为空串。
+        """
+        return self._resolved_menu_path
 
     def resolve_menu_path(self, service_code: str) -> str | None:
         """录制停止后反查 serviceCode → 中文菜单路径。

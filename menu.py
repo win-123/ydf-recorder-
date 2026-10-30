@@ -9,6 +9,7 @@ ydf_browser 模块**。调用方负责拉取菜单树 JSON 后传入（或使用
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urljoin
 
@@ -18,18 +19,23 @@ from .config import RecorderEnv
 from .menu_resolver import _walk_menu_tree
 
 
-def resolve_menu_to_service_code(
-    payload: Any,
-    menu_path: str,
-) -> str:
-    """在菜单树中查找 menu_path 对应的 serviceCode。
+@dataclass(frozen=True)
+class MenuResolution:
+    """菜单解析结果。
 
-    Args:
-        payload: service_tree 接口的原始返回（``{"data": [...]}`` 或列表）。
-        menu_path: 中文菜单路径，用 ``>>`` 分隔（如 ``"项目库>>项目建议>>项目建议"``）。
+    ``path`` 是**菜单树里的完整路径**（``>>`` 分隔），与
+    ``ydf_browser.gateway.resolve_menu`` 的后缀精确匹配完全对齐。
+    录制/回放都必须把这条路径写进 DSL：用户手填的路径常缺层级
+    （如漏掉「一级项目」），回放端是精确匹配，会直接报「未找到菜单」。
+    """
 
-    Returns:
-        serviceCode 字符串。
+    service_code: str
+    path: str
+    matched_by: str = "exact"  # exact / raw_leaf / normalized_leaf / contains
+
+
+def resolve_menu_target(payload: Any, menu_path: str) -> MenuResolution:
+    """在菜单树中查找 menu_path 对应的 serviceCode 与规范路径。
 
     Raises:
         ValueError: 菜单路径为空、未找到或找到多个匹配。
@@ -39,6 +45,7 @@ def resolve_menu_to_service_code(
         raise ValueError("菜单路径不能为空")
 
     tree = _unwrap_payload(payload)
+    matched_by = "exact"
     matches = [
         (node, path)
         for node, path in _walk_menu_tree(tree, [])
@@ -60,7 +67,12 @@ def resolve_menu_to_service_code(
             if not l0 and not l1
             and _leaf_contains(_normalize_leaf(p[-1]), leaf)
         ]
-        candidates = l0 or l1 or l2
+        if l0:
+            candidates, matched_by = l0, "raw_leaf"
+        elif l1:
+            candidates, matched_by = l1, "normalized_leaf"
+        else:
+            candidates, matched_by = l2, "contains"
         if len(candidates) == 1:
             matches = candidates
         elif len(candidates) > 1:
@@ -74,11 +86,34 @@ def resolve_menu_to_service_code(
     if len(matches) > 1:
         raise ValueError(f"找到多个菜单，无法唯一定位: {menu_path}")
 
-    node = matches[0][0]
+    node, resolved_path = matches[0]
     service_code = str(node.get("serviceCode") or "").strip()
     if not service_code:
         raise ValueError(f"菜单 '{menu_path}' 没有 serviceCode")
-    return service_code
+    return MenuResolution(
+        service_code=service_code,
+        path=">>".join(resolved_path),
+        matched_by=matched_by,
+    )
+
+
+def resolve_menu_to_service_code(
+    payload: Any,
+    menu_path: str,
+) -> str:
+    """在菜单树中查找 menu_path 对应的 serviceCode（``resolve_menu_target`` 的简写）。
+
+    Args:
+        payload: service_tree 接口的原始返回（``{"data": [...]}`` 或列表）。
+        menu_path: 中文菜单路径，用 ``>>`` 分隔（如 ``"项目库>>项目建议>>项目建议"``）。
+
+    Returns:
+        serviceCode 字符串。
+
+    Raises:
+        ValueError: 菜单路径为空、未找到或找到多个匹配。
+    """
+    return resolve_menu_target(payload, menu_path).service_code
 
 
 def fetch_menu_tree(env: RecorderEnv, session: requests.Session) -> Any:

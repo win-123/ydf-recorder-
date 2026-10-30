@@ -155,7 +155,7 @@ def _is_login_redirect(response, url):
         return False
 
 
-def _read_json(session, url):
+def _read_json(session, url, *, expired_on_bad_json=False):
     try:
         response = session.get(url, timeout=20, allow_redirects=False)
     except requests.RequestException as exc:
@@ -169,14 +169,20 @@ def _read_json(session, url):
     try:
         payload = response.json()
     except ValueError:
+        # 部分工作台版本在会话过期时对探测接口返回 HTTP 200 + 登录页/错误页 HTML，
+        # 而不是 401 或登录重定向。复用旧会话时把这种情况按「会话失效」处理，
+        # 走重新登录兜底，而不是直接让整个用例失败。
+        if expired_on_bad_json:
+            raise SessionExpired('会话探测响应不是有效 JSON（按会话失效重新登录）') from None
         raise RuntimeError('会话探测响应不是有效 JSON') from None
     if not isinstance(payload, dict):
         raise RuntimeError('会话探测响应结构无效')
     return payload
 
 
-def probe_identity(env, session):
-    info = _read_json(session, urljoin(env.base_url, env.endpoints.tenant_information))
+def probe_identity(env, session, *, expired_on_bad_json=False):
+    info = _read_json(session, urljoin(env.base_url, env.endpoints.tenant_information),
+                      expired_on_bad_json=expired_on_bad_json)
     data = info.get('data')
     params = data.get('globalParams') if isinstance(data, dict) else None
     if not isinstance(params, dict):
@@ -305,7 +311,8 @@ class SessionReuse:
                 session = None if forced else store.load()
                 if session is not None:
                     try:
-                        info = probe_identity(env, session)
+                        # 复用旧会话的探测：非 JSON 响应（200 + 登录页 HTML）按会话失效处理
+                        info = probe_identity(env, session, expired_on_bad_json=True)
                         authentication.update(reused=True, reason='valid')
                     except (SessionExpired, IdentityMismatch) as exc:
                         authentication['reason'] = 'expired' if isinstance(exc, SessionExpired) else 'identity_mismatch'

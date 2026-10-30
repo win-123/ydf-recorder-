@@ -60,7 +60,7 @@ class TestP15UploadFilename(unittest.TestCase):
         events = _backfill_upload_filenames(events)
         self.assertEqual(events[0].target.uploaded_file_name, "预算表.xlsx")
         target = build_target("import", "upload", [events[0]])
-        self.assertEqual(target["file"], "<请填写文件路径: 预算表.xlsx>")
+        self.assertEqual(target["file"], "{{files.预算表_xlsx}}")
 
     def test_backfill_attachment_multi_file(self):
         events = [
@@ -69,7 +69,7 @@ class TestP15UploadFilename(unittest.TestCase):
         ]
         events = _backfill_upload_filenames(events)
         target = build_target("attachment", "upload", [events[0]])
-        self.assertEqual(target["attachments"][0]["file"], "<请填写文件路径: a.pdf, b.pdf>")
+        self.assertEqual(target["attachments"][0]["file"], "{{files.a_pdf_b_pdf}}")
 
     def test_cancelled_upload_keeps_placeholder(self):
         events = [ev("click", seq=1, text="导入", is_upload_trigger=True)]

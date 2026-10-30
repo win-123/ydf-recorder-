@@ -603,7 +603,7 @@ def test_identity_uses_business_account_only_with_matching_workbench_id(monkeypa
     from types import SimpleNamespace
     info = {'data': {'globalParams': {'userPk': 'u1', 'userName': 'demo'}}}
     reads = []
-    def read(session, url):
+    def read(session, url, **kwargs):
         reads.append(url)
         return info if len(reads) == 1 else {'user': business_user}
     monkeypatch.setattr(reuse, '_read_json', read)

@@ -1765,6 +1765,7 @@ def build_dsl_document(
         case_steps.append({"action": "open_menu", "menu_path": menu_path})
     case_steps.extend(steps)
     case_steps = _deduplicate_steps(case_steps)
+    case_steps = dedupe_repeated_fills(case_steps)
 
     suite_code = session.suite_code or "recorded_suite"
     suite_name = session.suite_name or "录制测试集"
@@ -1772,6 +1773,12 @@ def build_dsl_document(
         "录制生成。登录由运行时根据环境配置自动完成（DSL 无 login 动作）；"
         "首步骤 open_menu 显式打开业务菜单，之后的步骤均为页面业务操作。"
     )
+    upload_hint = _upload_parameterization_hint(case_steps)
+    if upload_hint and session.suite_description:
+        # 用户自带描述时追加而非覆盖
+        suite_description = f"{suite_description}\n{upload_hint}"
+    elif upload_hint:
+        suite_description = f"{suite_description}{upload_hint}"
 
     suite = DslTestSuite(
         code=suite_code,
@@ -1851,6 +1858,120 @@ def _deduplicate_steps(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
         if step != result[-1]:
             result.append(step)
     return result
+
+
+_SAVE_LABELS = ("保存", "确定", "确认")
+
+
+def dedupe_repeated_fills(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """去掉「同一表单字段同值重复填写」噪音（就地语义，返回新列表）。
+
+    背景（2026-10-30 用户反馈）：录制时用户在第一次点保存（常因校验失败）
+    之后，会把已填过的字段再敲一遍同值、再保存一次。回放时第一次保存已经
+    成功关闭了表单，这些重复步骤会让回放报
+    「未找到表单字段: xxx; 当前表单字段: 无」。
+
+    规则（保守，只动无语义影响的重复）：
+      1. ``form.fill`` 中与此前已填过的字段**同值**的键剔除；
+         剔除后 fields 为空 → 整步丢弃；
+      2. 连续两步 ``toolbar.click`` 且 label 相同、label ∈ (保存/确定/确认)
+         → 只保留第一次（第一次保存成功后表单已关闭，第二次必为噪音；
+         若第一次保存失败，回放会报错暴露真实问题，而不是静默错填）。
+    """
+    result: list[dict[str, Any]] = []
+    seen: dict[str, Any] = {}
+    changed = False
+    for step in steps:
+        if not isinstance(step, dict):
+            result.append(step)
+            continue
+        if step.get("component") == "form" and step.get("operation") == "fill":
+            fields = (step.get("target") or {}).get("fields")
+            if isinstance(fields, dict) and fields:
+                kept = {k: v for k, v in fields.items() if seen.get(k) != v}
+                for k, v in fields.items():
+                    seen[k] = v
+                if not kept:
+                    changed = True  # 全部与已填值相同 → 纯噪音，丢弃
+                    continue
+                if len(kept) != len(fields):
+                    changed = True
+                    new_step = dict(step)
+                    new_step["target"] = dict(step.get("target") or {})
+                    new_step["target"] = {**new_step["target"], "fields": kept}
+                    result.append(new_step)
+                    continue
+        result.append(step)
+
+    # 连续重复的保存类点击 → 保留第一次
+    final: list[dict[str, Any]] = []
+    for step in result:
+        if (
+            final
+            and isinstance(step, dict)
+            and step.get("component") == "toolbar"
+            and step.get("operation") == "click"
+            and str((step.get("target") or {}).get("label") or "") in _SAVE_LABELS
+        ):
+            last = final[-1]
+            if (
+                isinstance(last, dict)
+                and last.get("component") == "toolbar"
+                and last.get("operation") == "click"
+                and str((last.get("target") or {}).get("label") or "")
+                == str((step.get("target") or {}).get("label") or "")
+                and str((last.get("target") or {}).get("label") or "") in _SAVE_LABELS
+            ):
+                changed = True
+                continue
+        final.append(step)
+
+    if not changed:
+        return steps
+    return final
+
+
+# ── 上传参数化提示 ─────────────────────────────────────────
+
+_UPLOAD_VARIABLE_RE = re.compile(r"\{\{\s*files\.[^}]+\}\}")
+
+
+def collect_upload_variables(steps: list[dict[str, Any]]) -> list[str]:
+    """收集步骤里所有 ``{{files.*}}`` 上传变量名（去重保序）。
+
+    变量名是 ``files.<清洗后文件名>`` 的点分路径整体（如 ``files.预算表_xlsx``）。
+    """
+    names: list[str] = []
+
+    def _walk(value: Any) -> None:
+        if isinstance(value, dict):
+            for item in value.values():
+                _walk(item)
+        elif isinstance(value, list):
+            for item in value:
+                _walk(item)
+        elif isinstance(value, str):
+            for match in _UPLOAD_VARIABLE_RE.finditer(value):
+                name = match.group(0)[2:-2].strip()
+                if name and name not in names:
+                    names.append(name)
+
+    for step in steps:
+        _walk(step.get("target") or {})
+    return names
+
+
+def _upload_parameterization_hint(steps: list[dict[str, Any]]) -> str:
+    """含 ``{{files.*}}`` 上传变量时，生成 suite description 使用说明。"""
+    names = collect_upload_variables(steps)
+    if not names:
+        return ""
+    listed = "、".join(f"``{{{n}}}``" for n in names)
+    return (
+        f"\n上传参数化：本用例的文件路径通过变量 {listed} 注入（录制端无法获取本地绝对路径）。"
+        "回放前请提供变量值：命令行 `--var files.<名>=/绝对路径/文件` "
+        "或 `--vars-file 变量.yaml`（variables.files.<名>: /绝对路径/文件）。"
+    )
 
 
 # ── capture 自动注入 ────────────────────────────────────────

@@ -140,6 +140,10 @@ def _add_replay_args(parser: argparse.ArgumentParser, include_browser_flags: boo
     parser.add_argument("--tag", action="append", default=[], metavar="TAG", help="按标签过滤用例（可重复）")
     parser.add_argument("--vars-file", action="append", default=[], metavar="FILE", help="外部变量文件（可重复）")
     parser.add_argument(
+        "--var", dest="var", action="append", default=[], metavar="KEY=VALUE",
+        help="命令行变量覆盖（可重复），如 --var files.预算表_xlsx=/Users/me/预算表.xlsx",
+    )
+    parser.add_argument(
         "--summary-only", dest="summary_only", action="store_true", default=False,
         help="只输出最终 JSON 摘要，不透传过程日志",
     )
@@ -149,6 +153,10 @@ def _add_replay_args(parser: argparse.ArgumentParser, include_browser_flags: boo
         parser.add_argument(
             "--no-persistent-profile", dest="no_persistent_profile", action="store_true", default=False,
             help="不使用持久化浏览器 profile",
+        )
+        parser.add_argument(
+            "--no-normalize-menu", dest="normalize_menu", action="store_false", default=True,
+            help="回放前不按菜单树校正 open_menu.menu_path（默认会自动校正并另存 .normalized.yaml）",
         )
 
 
@@ -580,6 +588,15 @@ def _record_from_browser(args: argparse.Namespace, output_path: str) -> int:
     raw_events: list[dict] = []
     try:
         recorder.start()
+        # ★ 录制端已把「用户手填路径」解析成菜单树中的真实完整路径，
+        # DSL 必须写后者：回放端的菜单解析是后缀精确匹配。
+        resolved_by_tree = (getattr(recorder, "resolved_menu_path", "") or "").strip()
+        if resolved_by_tree:
+            if menu_path_arg and resolved_by_tree != menu_path_arg:
+                _log_progress(
+                    f"record: menu_path 已规范化为菜单树真实路径: {menu_path_arg} → {resolved_by_tree}"
+                )
+            menu_path = resolved_by_tree
         raw_events = recorder.wait_for_stop()
         # 反查中文菜单路径（需 context 存活，必须在 stop 前）
         # 如果用户未指定 --menu-path，从录制事件中提取 serviceCode 反查

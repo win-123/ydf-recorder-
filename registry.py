@@ -338,32 +338,52 @@ def _build_action(operation: str, events: list[RecordedEvent]) -> dict[str, Any]
     return result
 
 
+def _sanitize_upload_var_name(fname: str) -> str:
+    """将文件名清洗为合法的 DSL 变量名（``files.<name>`` 的 ``<name>`` 段）。
+
+    DSL 变量按 ``.`` 分层解析，文件名里的扩展名点号必须替换成下划线；
+    只保留中文/字母/数字/下划线，限长 30，空则回退 ``file``。
+    """
+    name = re.sub(r"[^\w\u4e00-\u9fff]+", "_", fname).strip("_")
+    if len(name) > 30:
+        name = name[:30].rstrip("_")
+    return name or "file"
+
+
+def _upload_file_value(fname: str | None) -> str:
+    """生成上传文件路径值：有文件名 → ``{{files.*}}`` 变量引用（参数化），
+    无文件名（用户取消选择）→ 保留人工占位符。"""
+    if not fname:
+        return "<请填写文件路径>"
+    return "{{files." + _sanitize_upload_var_name(fname) + "}}"
+
+
 def _build_attachment_upload(operation: str, events: list[RecordedEvent]) -> dict[str, Any]:
     """构建 attachment.upload target。
 
     浏览器安全模型拿不到完整文件路径，只能通过后续 file change 事件拿到
-    文件名（converter._backfill_upload_filenames 回填），生成带文件名的
-    占位符供用户手动补全路径。
+    文件名（converter._backfill_upload_filenames 回填）。有文件名时生成
+    ``{{files.<名>}}`` 变量引用，回放时通过 ``--var files.<名>=/绝对路径``
+    或 ``--vars-file`` 注入真实路径；无文件名时退化为人工占位符。
     """
     event = events[0]
-    label = (event.target.text or "上传附件").strip()
     fname = next(
         (e.target.uploaded_file_name for e in events if e.target.uploaded_file_name),
         None,
     )
-    file_placeholder = f"<请填写文件路径: {fname}>" if fname else "<请填写文件路径>"
+    # 注意：attachment.upload 的 target 契约是 {attachments, file, path, type,
+    # attachment_type, name}，不含 label；附件定位靠 type（附件类型），按钮文案
+    # 写进 target 会被 vendor 校验拒绝（"不支持属性: label"）。
     return {
-        "label": label,
-        "attachments": [{"type": "<请填写附件类型>", "file": file_placeholder}],
+        "attachments": [{"type": "<请填写附件类型>", "file": _upload_file_value(fname)}],
     }
 
 
 def _build_import_upload(operation: str, events: list[RecordedEvent]) -> dict[str, Any]:
     """构建 import.upload target。
 
-    浏览器安全模型拿不到完整文件路径，只能通过后续 file change 事件拿到
-    文件名（converter._backfill_upload_filenames 回填），生成带文件名的
-    占位符供用户手动补全路径。
+    文件路径生成规则见 ``_build_attachment_upload``：优先 ``{{files.*}}``
+    变量引用（参数化），无文件名时退化为人工占位符。
     """
     event = events[0]
     label = (event.target.text or "导入").strip()
@@ -373,7 +393,7 @@ def _build_import_upload(operation: str, events: list[RecordedEvent]) -> dict[st
     )
     return {
         "label": label,
-        "file": f"<请填写文件路径: {fname}>" if fname else "<请填写文件路径>",
+        "file": _upload_file_value(fname),
     }
 
 
