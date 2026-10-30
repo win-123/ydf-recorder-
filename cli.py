@@ -104,6 +104,19 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _add_replay_args(validate_parser, include_browser_flags=False)
 
+    gui_parser = subparsers.add_parser(
+        "gui", help="打开图形界面（多环境配置管理 + 录制 / 回放）",
+        description=(
+            "图形界面：维护多份环境配置（环境地址/租户/组织/账号/变量），"
+            "录制与回放时可直接选择使用哪一份，并列出回放器内置参数化变量"
+        ),
+    )
+    gui_parser.set_defaults(command="gui")
+    gui_parser.add_argument(
+        "--check", action="store_true", default=False,
+        help="仅自检界面能否创建（构建/打包验证用），不显示窗口",
+    )
+
     install_parser = subparsers.add_parser(
         "install-ydf-browser", help="从源码构建内嵌回放运行时 venv",
         description=(
@@ -224,6 +237,11 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "bump":
         return _cmd_bump(args)
+
+    if args.command == "gui":
+        from .gui import main as gui_main
+
+        return gui_main()
 
     if args.command == "replay":
         try:

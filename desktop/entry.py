@@ -13,7 +13,6 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
-from datetime import datetime
 from pathlib import Path
 
 CONFIG_TEMPLATE = """\
@@ -99,31 +98,24 @@ def _bootstrap_config_on_first_run() -> None:
 
 
 def _default_args_for_double_click(argv: list[str]) -> list[str]:
-    """双击 .exe（无任何参数）时补上默认参数，做到“双击即录”。"""
+    """双击可执行文件（无任何参数）时进入图形界面。
+
+    macOS 由 launcher.sh 传参（它自己会先试 GUI），这里覆盖 Windows/Linux
+    双击场景：默认打开配置管理界面，而不是直接开始录制。
+    """
     if not _is_frozen() or len(argv) > 1:
         return []
-    if sys.platform != "win32":
-        return []  # macOS/Linux 由启动器脚本传参
-    out_dir = Path.home() / "Downloads" / "ydf-recordings"
-    out_dir.mkdir(parents=True, exist_ok=True)
-    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    extra = ["--env", "ydf", "--output", str(out_dir / f"suite_{ts}.yaml")]
-
-    try:
-        menu = input("要自动打开的菜单路径（用 >> 分隔，可留空直接回车）：").strip()
-    except (EOFError, KeyboardInterrupt):
-        menu = ""
-    if menu:
-        extra += ["--menu-path", menu]
-    return extra
+    return ["gui"]
 
 
 def main() -> int:
     _setup_bundled_browser()
-    _bootstrap_config_on_first_run()
     extra = _default_args_for_double_click(list(sys.argv))
     if extra:
         sys.argv = [sys.argv[0], *extra]
+    # 图形界面自己能在界面上创建/保存配置，不做“首次必须手改 yaml”的阻断
+    if sys.argv[1:2] != ["gui"]:
+        _bootstrap_config_on_first_run()
     from ydf_recorder.cli import main as cli_main
 
     return cli_main()

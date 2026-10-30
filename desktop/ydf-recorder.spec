@@ -32,6 +32,13 @@ hiddenimports = [
     "ydf_recorder.replay",
     "ydf_recorder.auth",
     "ydf_recorder.menu_resolver",
+    "ydf_recorder.gui",
+    "ydf_recorder.gui_config",
+    # 图形界面（配置管理 + 录制/回放）
+    "tkinter",
+    "tkinter.ttk",
+    "tkinter.filedialog",
+    "tkinter.messagebox",
 ] + list(pw_hidden)
 
 a = Analysis(
@@ -43,7 +50,7 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=["tkinter", "pytest", "setuptools", "pip", "wheel"],
+    excludes=["pytest", "setuptools", "pip", "wheel"],
     noarchive=False,
     optimize=0,
 )
