@@ -10,6 +10,16 @@ from ..observation import redact_url
 from .model import PopupReferenceError
 from .selection import build_popup_reference_trigger_selectors
 
+def _diag_dir() -> Path:
+    """诊断产物落盘目录（Windows 无 /tmp，改用系统临时目录）。"""
+    if os.name == "nt":
+        from tempfile import gettempdir
+
+        return Path(gettempdir())
+    return Path("/tmp")
+
+
+
 def _network_event_payload(item: dict[str, Any]) -> dict[str, Any]:
     return {
         "url": redact_url(str(item.get("url") or "")),
@@ -40,7 +50,7 @@ class EvidenceStage:
     def _save_diagnostic_screenshot(self, name: str) -> str:
         if self.observation_session is not None:
             return ""
-        target = Path("/tmp") / f"ydf-browser-{name}-{int(time.time())}.png"
+        target = _diag_dir() / f"ydf-browser-{name}-{int(time.time())}.png"
         try:
             self._require_page().screenshot(path=str(target), full_page=True, timeout=5000)
         except Exception:
@@ -51,7 +61,7 @@ class EvidenceStage:
         return reference
 
     def _save_diagnostic_json(self, name: str, payload: dict[str, Any]) -> str:
-        target = Path("/tmp") / f"ydf-browser-{name}-{int(time.time())}.json"
+        target = _diag_dir() / f"ydf-browser-{name}-{int(time.time())}.json"
         try:
             target.write_text(
                 json.dumps(payload, ensure_ascii=False, indent=2, default=str),

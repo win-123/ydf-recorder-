@@ -45,6 +45,7 @@ def _setup_bundled_browser() -> None:
     base = _exe_dir()
     for cand in (
         base / "chromium",  # Windows: chromium 放在 exe 旁边
+        base.parent / "chromium",  # 容错：exe 在子目录、chromium 在上一层
         base.parent / "Resources" / "chromium",
         base / "Resources" / "chromium",
         base.parent.parent / "chromium",  # macOS .app: Contents/Resources/chromium
@@ -52,6 +53,15 @@ def _setup_bundled_browser() -> None:
         if cand.is_dir():
             os.environ["PLAYWRIGHT_BROWSERS_PATH"] = str(cand)
             return
+
+
+def _ensure_utf8_stdio() -> None:
+    """Windows 控制台默认 GBK，中文日志会乱码或抛 UnicodeEncodeError。"""
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
+        except (AttributeError, ValueError, OSError):
+            pass
 
 
 
@@ -109,6 +119,7 @@ def _default_args_for_double_click(argv: list[str]) -> list[str]:
 
 
 def main() -> int:
+    _ensure_utf8_stdio()
     _setup_bundled_browser()
     extra = _default_args_for_double_click(list(sys.argv))
     if extra:

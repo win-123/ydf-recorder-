@@ -35,6 +35,29 @@ def _launch_command(extra: list[str]) -> list[str]:
     return [sys.executable, "-m", "ydf_recorder", *extra]
 
 
+def child_env(config_path: str) -> dict[str, str]:
+    """录制/回放子进程的环境变量。
+
+    Windows 的默认控制台编码是 GBK，中文日志会乱码或在父进程按 UTF-8
+    解码时抛错；这里统一把子进程的 stdio 钉成 UTF-8，与父进程的
+    ``encoding="utf-8"`` 对齐。同时把配置路径显式传下去（双击启动时
+    HOME 可能指向别处）。
+    """
+    env = dict(os.environ)
+    env["YDF_RECORDER_CONFIG"] = config_path
+    env["PYTHONUTF8"] = "1"
+    env["PYTHONIOENCODING"] = "utf-8"
+    return env
+
+
+def _child_popen_kwargs() -> dict[str, Any]:
+    """Windows 下隐藏子进程的控制台黑窗（输出已由 PIPE 捕获）。"""
+    if sys.platform == "win32":
+        flag = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+        return {"creationflags": flag}
+    return {}
+
+
 def build_record_args(profile: str, output: str | Path, menu_path: str = "") -> list[str]:
     """录制命令参数（复用 CLI record，环境由 --env 指定）。"""
     args = ["--env", profile, "--output", str(output)]
@@ -587,8 +610,7 @@ class RecorderApp:
         if self.process is not None and self.process.poll() is None:
             self._alert("已有任务正在运行，请等待完成")
             return
-        env = dict(os.environ)
-        env["YDF_RECORDER_CONFIG"] = str(self.cfg_path)
+        env = child_env(str(self.cfg_path))
         cmd = _launch_command(args)
         status_label.configure(text="运行中…")
         button.state(["disabled"])
@@ -603,8 +625,11 @@ class RecorderApp:
                     stderr=subprocess.STDOUT,
                     stdin=subprocess.DEVNULL,
                     text=True,
+                    encoding="utf-8",       # 子进程固定 UTF-8 输出，避免 Windows 下按 GBK 解码乱码
+                    errors="replace",
                     bufsize=1,
                     env=env,
+                    **_child_popen_kwargs(),
                 )
             except OSError as exc:
                 self.output_queue.put(f"[启动失败] {exc}\n")
@@ -721,9 +746,25 @@ def _flatten(variables: dict[str, Any], prefix: str = "") -> dict[str, str]:
     return flat
 
 
+def _enable_windows_dpi_awareness() -> None:
+    """让 Windows 高分屏下的界面不糊（不调用则整窗被系统放大成位图）。"""
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+
+        ctypes.windll.shcore.SetProcessDpiAwareness(1)  # PROCESS_SYSTEM_DPI_AWARE
+    except Exception:  # noqa: BLE001 - 老系统没有 shcore，忽略即可
+        try:
+            ctypes.windll.user32.SetProcessDPIAware()
+        except Exception:  # noqa: BLE001
+            pass
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     check_only = "--check" in argv
+    _enable_windows_dpi_awareness()
     try:
         import tkinter as tk
     except Exception as exc:  # noqa: BLE001 - 无 Tk 时交给启动器回退

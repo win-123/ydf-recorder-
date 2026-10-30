@@ -725,34 +725,16 @@ def _options_from_args(args, yaml_path: str) -> ReplayOptions:
     )
 
 
-def _clear_stale_profile_lock() -> None:
-    """清理 ydf-browser 持久化 profile 的残留 Singleton 锁。
+LOCK_FILES = ("SingletonLock", "SingletonCookie", "SingletonSocket")
 
-    回放中途崩溃/被强杀后，``~/.ydf-browser/browser-profile/default/`` 里会
-    留下 SingletonLock 等符号链接，导致下次启动 Chromium 直接失败
-    （Failed to create a ProcessSingleton）。这里只在锁指向的进程已不存在时
-    清理，避免误删正在运行的浏览器的锁。
-    """
-    import errno
 
-    profile = Path.home() / ".ydf-browser" / "browser-profile" / "default"
-    lock = profile / "SingletonLock"
-    if not lock.is_symlink() and not lock.exists():
-        return
-    alive = False
-    try:
-        target = os.readlink(lock)  # 形如 "hostname-12345"
-        pid_text = target.rsplit("-", 1)[-1]
-        pid = int(pid_text)
-        os.kill(pid, 0)
-        alive = True
-    except (OSError, ValueError, AttributeError) as exc:
-        if isinstance(exc, OSError) and exc.errno == errno.EPERM:
-            alive = True  # 进程存在但无权限探测 → 视为运行中
-    if alive:
-        return
+def _profile_dir() -> Path:
+    return Path.home() / ".ydf-browser" / "browser-profile" / "default"
+
+
+def _unlink_locks(profile: Path) -> None:
     removed = []
-    for name in ("SingletonLock", "SingletonCookie", "SingletonSocket"):
+    for name in LOCK_FILES:
         p = profile / name
         try:
             if p.is_symlink() or p.exists():
@@ -766,6 +748,42 @@ def _clear_stale_profile_lock() -> None:
             file=sys.stderr,
         )
 
+
+def _is_lock_owner_alive(lock: Path) -> bool:
+    """POSIX 下从 SingletonLock 符号链接（hostname-pid）探测进程是否还活着。"""
+    if sys.platform == "win32":
+        return False
+    try:
+        pid = int(os.readlink(lock).rsplit("-", 1)[-1])
+        os.kill(pid, 0)
+        return True
+    except OSError as exc:
+        import errno
+
+        return exc.errno == errno.EPERM  # 进程存在但无权限探测
+    except (ValueError, AttributeError):
+        return False
+
+
+def _clear_stale_profile_lock() -> None:
+    """清理 ydf-browser 持久化 profile 的残留 Singleton 锁。
+
+    回放中途崩溃/被强杀后，``~/.ydf-browser/browser-profile/default/`` 里会
+    留下 SingletonLock 等文件，导致下次启动 Chromium 直接失败
+    （Failed to create a ProcessSingleton）。这里只在锁的持有进程已不存在时
+    清理，避免误删正在运行的浏览器的锁。
+
+    Windows 上 Chromium 用的是普通文件 + 命名互斥量（没有符号链接，也没有
+    POSIX 的 pid 探测手段，且 os.kill 在 Windows 上会真的终止进程），因此直接
+    尝试删除：浏览器运行中时文件被独占打开，删除会失败并被忽略。
+    """
+    profile = _profile_dir()
+    lock = profile / "SingletonLock"
+    if not lock.is_symlink() and not lock.exists():
+        return
+    if _is_lock_owner_alive(lock):
+        return
+    _unlink_locks(profile)
 
 def handle_replay(args) -> int:
     yaml_path = args.yaml

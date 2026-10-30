@@ -39,6 +39,19 @@ from .request_forwarding import RequestForwardRule, match_request_forwarding, re
 from .table_scope import ResolvedTableScope, TableRuntimeEvidence, table_scoped
 from .template_parser import build_page_manifest
 
+
+def _diag_dir() -> Path:
+    """诊断产物（截图/JSON）落盘目录。
+
+    POSIX 沿用 /tmp（保持既有行为与文档一致）；Windows 没有 /tmp，
+    Path("/tmp") 会落到当前盘符根目录且通常不可写，导致诊断静默丢失。
+    """
+    if os.name == "nt":
+        from tempfile import gettempdir
+
+        return Path(gettempdir())
+    return Path("/tmp")
+
 _TAB_RETRY_INTERVAL_S = 0.5
 _TAB_RETRY_TIMEOUT_S = 5.0
 
@@ -8289,7 +8302,7 @@ class PlaywrightRuntime:
         if wait_ms > 0:
             page.wait_for_timeout(wait_ms)
         safe_table = re.sub(r"[^0-9A-Za-z\u4e00-\u9fff_-]+", "_", str(table or "default")).strip("_") or "default"
-        target = Path("/tmp") / f"ydf-browser-table-selection-{int(time.time() * 1000)}-{safe_table}-row{row_number}.png"
+        target = _diag_dir() / f"ydf-browser-table-selection-{int(time.time() * 1000)}-{safe_table}-row{row_number}.png"
         try:
             page.screenshot(path=str(target), full_page=True)
         except Exception as exc:
@@ -11578,7 +11591,7 @@ class PlaywrightRuntime:
         if self.observation_session is not None:
             return ""
         page = self._require_page()
-        target = Path("/tmp") / f"ydf-browser-{name}-{int(time.time())}.png"
+        target = _diag_dir() / f"ydf-browser-{name}-{int(time.time())}.png"
         try:
             page.screenshot(path=str(target), full_page=True, timeout=5000)
         except Exception:
@@ -11734,7 +11747,7 @@ class PlaywrightRuntime:
         }
 
     def _save_diagnostic_json(self, name: str, payload: dict[str, Any]) -> str:
-        target = Path("/tmp") / f"ydf-browser-{name}-{int(time.time())}.json"
+        target = _diag_dir() / f"ydf-browser-{name}-{int(time.time())}.json"
         try:
             target.write_text(json.dumps(payload, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
         except Exception:
