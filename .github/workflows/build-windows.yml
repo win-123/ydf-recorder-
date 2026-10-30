@@ -1,0 +1,122 @@
+name: Build Windows package
+
+# 用途：在没有 Windows 构建机的情况下，用 GitHub 的 Windows runner 产出
+# 自包含的 Windows 分发包（dist\YonDiF-Recorder-windows.zip）。
+#
+# 触发方式
+#   1. 手动：Actions → Build Windows package → Run workflow
+#   2. 打 tag：git tag v0.1.4 && git push origin v0.1.4
+#      → 自动构建并创建 Release，zip 挂到 Release 附件
+#
+# 产物内容：YonDiFRecorder\{YonDiFRecorder.exe, _internal\, chromium\, ydfbrowser-cli\}
+# 目标机无需 Python / Chrome / 任何依赖。
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: windows-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 准备 Python 3.11 (64-bit)
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      # Chromium ~250MB，按 pyproject.toml 的哈希缓存；playwright 版本变了会自动失效
+      - name: 缓存内嵌 Chromium
+        id: chromium-cache
+        uses: actions/cache@v4
+        with:
+          path: dist/_chromium
+          key: chromium-win-${{ hashFiles('pyproject.toml') }}
+
+      - name: 构建（bat 内含环境自检 / PyInstaller / 回放器 / 组装 / zip）
+        shell: cmd
+        run: |
+          set CACHE_HIT=${{ steps.chromium-cache.outputs.cache-hit }}
+          set EXTRA=
+          if "%CACHE_HIT%"=="true" set EXTRA=--skip-browsers
+          if "%CACHE_HIT%"=="true" echo Using cached Chromium: --skip-browsers
+          call desktop\build_windows.bat %EXTRA%
+          if errorlevel 1 exit /b 1
+
+      - name: 校验产物完整性
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $root = "dist/YonDiF-Recorder-windows"
+          $app  = "$root/YonDiFRecorder"
+
+          $required = @(
+            "$app/YonDiFRecorder.exe",
+            "$app/_internal",
+            "$app/chromium",
+            "$app/ydfbrowser-cli/ydfbrowser-cli.exe",
+            "$root/version.txt",
+            "$root/README.txt",
+            "$root.zip"
+          )
+          foreach ($p in $required) {
+            if (-not (Test-Path $p)) { throw "缺少产物: $p" }
+          }
+          Write-Host "OK 文件齐全"
+
+          # 内置浏览器两套都要在（录制用 chromium，回放用 headless shell）
+          $chromiumDirs = Get-ChildItem "$app/chromium" -Directory | Select-Object -ExpandProperty Name
+          Write-Host "chromium 目录: $($chromiumDirs -join ', ')"
+          if (-not ($chromiumDirs -match "^chromium-\d+$")) { throw "缺少 chromium-<rev> 目录" }
+          if (-not ($chromiumDirs -match "headless_shell")) { throw "缺少 chromium_headless_shell 目录" }
+
+          # 回放器必须能真正启动（缺 openpyxl 之类会在这里暴露）
+          $out = & "$app/ydfbrowser-cli/ydfbrowser-cli.exe" --help 2>&1
+          if ($LASTEXITCODE -ne 0) { throw "ydfbrowser-cli 无法启动: $($out -join ' ')" }
+          Write-Host "OK ydfbrowser-cli 可执行"
+
+          # 图形界面自检（无桌面会话时 Tk 可能创建失败，仅告警不阻断）
+          & "$app/YonDiFRecorder.exe" gui --check 2>&1 | Write-Host
+          if ($LASTEXITCODE -ne 0) { Write-Warning "gui --check 返回 $LASTEXITCODE（CI 无桌面会话时属正常）" } else { Write-Host "OK GUI 自检通过" }
+
+          $sizeMb = [math]::Round((Get-Item "$root.zip").Length / 1MB, 1)
+          Write-Host "包大小: $sizeMb MB"
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- Windows 包：``$root.zip`` ($sizeMb MB)"
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- 版本：$(Get-Content "$root/version.txt")"
+
+      - name: 上传产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: YonDiF-Recorder-windows
+          path: dist/YonDiF-Recorder-windows.zip
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: 发布 Release（仅 tag 触发）
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/YonDiF-Recorder-windows.zip
+          generate_release_notes: true
+          body: |
+            Windows 自包含包（无需安装 Python / Chrome）。
+
+            解压后双击 `YonDiFRecorder\YonDiFRecorder.exe`，在「环境配置」页填写
+            服务地址 / 租户 / 组织 / 账号后即可录制；「回放」页可直接跑 YAML。
+
+            建议解压到不含中文与空格的路径（如 `D:\Tools\YonDiF-Recorder`）。

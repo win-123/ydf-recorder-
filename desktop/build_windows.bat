@@ -45,6 +45,17 @@ REM UTF-8 console + unbuffered output so Chinese log lines are readable
 set PYTHONUTF8=1
 set PYTHONIOENCODING=utf-8
 
+echo ==^> [0/8] Sanity check (Python 3.11+ 64-bit required)
+python -c "import sys; sys.exit(0 if sys.version_info>=(3,11) and sys.maxsize>2**32 else 1)" 2>nul
+if errorlevel 1 (
+  echo.
+  echo ERROR: Python 3.11 or newer, 64-bit, is required on PATH.
+  echo Current interpreter:
+  python -c "import sys,platform;print(' ',sys.version.replace(chr(10),' '));print(' ',platform.architecture()[0])" 2>nul
+  goto :fail
+)
+python -c "import sys;print('    python', sys.version.split()[0], '64-bit')"
+
 echo ==^> [1/8] Build toolchain (PyInstaller)
 if not exist "%BUILD_VENV%" (
   python -m venv "%BUILD_VENV%" || goto :fail
@@ -134,6 +145,20 @@ echo ==^> [7/8] First-run notes
 >> "%OUTDIR%\README.txt" echo (e.g. D:\Tools\YonDiF-Recorder) - Chromium handles such paths
 >> "%OUTDIR%\README.txt" echo poorly on some Windows setups. Always unzip first; do not run
 >> "%OUTDIR%\README.txt" echo the exe from inside the .zip preview.
+
+echo ==^> [7.5/8] Keep Chromium for --skip-browsers / CI cache
+REM Keep a copy of the browser in dist\_chromium after a full build so the next
+REM --skip-browsers run (and the CI actions/cache step) can reuse it instead of
+REM re-downloading ~250MB.
+if "%SKIP_BROWSERS%"=="0" (
+  if not exist "%CHROMIUM_KEEP%" (
+    if exist "%APPDIR%\chromium" (
+      echo     copying chromium to dist\_chromium for reuse
+      robocopy "%APPDIR%\chromium" "%CHROMIUM_KEEP%" /E /NFL /NDL /NJH /NJS /NP > nul
+      if errorlevel 8 echo     WARNING: chromium cache copy failed ^(next run will re-download^)
+    )
+  )
+)
 
 echo ==^> [8/8] Zip
 if exist "%OUTDIR%.zip" del /q "%OUTDIR%.zip"
