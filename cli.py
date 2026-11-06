@@ -40,6 +40,17 @@ from .cdp import RecorderRuntime
 from .config import RecorderEnv, load_recorder_env
 from .converter import build_dsl_document, dsl_to_yaml, load_events_from_json, load_events_from_jsonl
 from .models import RecordedEvent, RecordingSession
+from .parameterize import (
+    ParameterizeSpec,
+    build_default_variables,
+    load_existing_variables,
+    load_spec_file,
+    parameterize_document,
+    parse_rule,
+    parse_value_assignment,
+    variables_file_path,
+    write_variables_file,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -219,6 +230,45 @@ def _add_record_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--abstract-values", dest="abstract_values", action="store_true", default=False,
         help="自动将硬编码值替换为 {{random.*}} 变量",
+    )
+    parser.add_argument(
+        "--param-auto", "--parameterize-auto", dest="parameterize_auto",
+        action="store_true", default=False,
+        help="把录制时录入的业务值抽成 {{input.*}} 外部变量，并生成 .vars.yaml 默认值清单",
+    )
+    parser.add_argument(
+        "--param-field", "--parameterize-field", dest="parameterize_fields",
+        action="append", default=[], metavar="FIELD=VAR",
+        help="按字段标签指定变量名（可重复），如 --param-field 项目名称=project.name。"
+             "推荐显式指定业务主键，其它基础数据保持原值",
+    )
+    parser.add_argument(
+        "--param-value", "--parameterize-value", dest="parameterize_values",
+        action="append", default=[], metavar="VALUE=VAR",
+        help="按录制值指定变量名（可重复），如 --param-value 一级项目A=project.name",
+    )
+    parser.add_argument(
+        "--param-map", "--parameterize-map", dest="parameterize_map", default=None,
+        metavar="FILE",
+        help="变量映射文件（YAML/JSON，支持 auto / namespace / fields / values）",
+    )
+    parser.add_argument(
+        "--param-set", dest="parameterize_defaults", action="append", default=[],
+        metavar="VAR=VALUE",
+        help="直接指定变量默认值（可重复），如 --param-set project.name=一级项目-001",
+    )
+    parser.add_argument(
+        "--vars-output", dest="vars_output", default=None, metavar="FILE",
+        help="变量清单输出路径（默认 <输出YAML同目录>/<用例名>.vars.yaml）；"
+             "A 提交与 B 审核两段用例请指向同一份文件以共用同一个值",
+    )
+    parser.add_argument(
+        "--vars-fresh", dest="vars_fresh", action="store_true", default=False,
+        help="开启新一轮数据：忽略已有变量文件里的值，重新生成唯一默认值",
+    )
+    parser.add_argument(
+        "--vars-plain", dest="vars_plain", action="store_true", default=False,
+        help="变量默认值直接使用录制原值，不加唯一后缀（适合固定基础数据）",
     )
     parser.add_argument(
         "--browser", dest="browser", default="builtin",
@@ -535,6 +585,69 @@ def _cmd_record(args: argparse.Namespace) -> int:
     return _record_from_browser(args, output_path)
 
 
+def _apply_parameterization(
+    args: argparse.Namespace, document, output_path: str
+) -> dict[str, object]:
+    """按 CLI 规则把录制值抽成外部变量，并写出 ``.vars.yaml`` 默认值清单。"""
+    spec = ParameterizeSpec(auto=getattr(args, "parameterize_auto", False))
+    for rule in getattr(args, "parameterize_fields", []) or []:
+        key, name = parse_rule(rule)
+        spec.field_rules[key] = name
+    for rule in getattr(args, "parameterize_values", []) or []:
+        key, name = parse_rule(rule)
+        spec.value_rules[key] = name
+
+    map_path = getattr(args, "parameterize_map", None)
+    if map_path:
+        from_file = load_spec_file(map_path)
+        spec.auto = spec.auto or from_file.auto
+        spec.namespace = from_file.namespace
+        for key, name in from_file.field_rules.items():
+            spec.field_rules.setdefault(key, name)
+        for key, name in from_file.value_rules.items():
+            spec.value_rules.setdefault(key, name)
+
+    if not spec.enabled:
+        return {}
+    result = parameterize_document(document, spec)
+    if not result.variables:
+        return {"variables": 0, "variables_file": None}
+
+    vars_path = getattr(args, "vars_output", None) or str(variables_file_path(output_path))
+    fresh = bool(getattr(args, "vars_fresh", False))
+    existing = {} if fresh else load_existing_variables(vars_path)
+    explicit: dict[str, str] = {}
+    for assignment in getattr(args, "parameterize_defaults", []) or []:
+        name, value = parse_value_assignment(assignment)
+        explicit[name] = value
+    values = build_default_variables(
+        result.variables,
+        existing=existing,
+        explicit=explicit,
+        fresh=fresh,
+        unique=not bool(getattr(args, "vars_plain", False)),
+    )
+    write_variables_file(vars_path, values)
+    reused = sorted(set(existing) & set(values) - set(explicit))
+    _log_progress(
+        f"record: 已参数化 {len(values)} 个业务值 / {result.replaced} 处引用，"
+        f"变量清单 → {vars_path}"
+    )
+    if reused:
+        _log_progress(f"record: 复用已有变量值 {', '.join(reused)}（与上一轮数据保持同一条）")
+    _log_progress(
+        f"record: 回放请传 --vars-file {vars_path}；"
+        "A 提交与 B 审核请共用同一份变量文件"
+    )
+    return {
+        "variables": len(values),
+        "variables_file": str(Path(vars_path).resolve()),
+        "variable_names": sorted(values),
+        "variables_reused": reused,
+        "row_selection": result.row_selection.as_dict(),
+    }
+
+
 def _convert_from_events(args: argparse.Namespace, output_path: str) -> int:
     events_file = args.from_events
     if events_file.endswith(".jsonl"):
@@ -562,6 +675,7 @@ def _convert_from_events(args: argparse.Namespace, output_path: str) -> int:
         events=events,
     )
     document = build_dsl_document(session, abstract=args.abstract_values, auto_capture=args.auto_capture)
+    param_info = _apply_parameterization(args, document, output_path)
     yaml_content = dsl_to_yaml(document)
 
     Path(output_path).write_text(yaml_content, encoding="utf-8")
@@ -571,6 +685,7 @@ def _convert_from_events(args: argparse.Namespace, output_path: str) -> int:
         "suite_code": args.suite_code,
         "steps": len(document.cases[0].steps) if document.cases else 0,
         "events": len(events),
+        **param_info,
     })
     _log_progress(f"record: DSL 已写入 {output_path}")
     _log_replay_hints(output_path)
@@ -656,6 +771,7 @@ def _record_from_browser(args: argparse.Namespace, output_path: str) -> int:
     )
 
     document = build_dsl_document(session, abstract=args.abstract_values, auto_capture=args.auto_capture)
+    param_info = _apply_parameterization(args, document, output_path)
     yaml_content = dsl_to_yaml(document)
 
     Path(output_path).write_text(yaml_content, encoding="utf-8")
@@ -671,6 +787,7 @@ def _record_from_browser(args: argparse.Namespace, output_path: str) -> int:
         "menu_path": menu_path,
         "steps": len(document.cases[0].steps) if document.cases else 0,
         "events": len(events),
+        **param_info,
     })
     _log_progress(
         f"record: {len(events)} 个事件 → "

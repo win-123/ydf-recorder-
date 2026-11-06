@@ -31,6 +31,16 @@ from .models import (
     RecordedEventTarget,
     RecordingSession,
 )
+from .parameterize import (
+    ParameterizeSpec,
+    RowSelectionReport,
+    build_default_variables,
+    inspect_row_selections,
+    load_existing_variables,
+    parameterize_document,
+    variables_to_yaml,
+    write_variables_file,
+)
 
 __all__ = [
     "__version__",
@@ -59,4 +69,13 @@ __all__ = [
     "RecordedEventMeta",
     "RecordedEventTarget",
     "RecordingSession",
+    # 录制值参数化
+    "ParameterizeSpec",
+    "RowSelectionReport",
+    "build_default_variables",
+    "inspect_row_selections",
+    "load_existing_variables",
+    "parameterize_document",
+    "variables_to_yaml",
+    "write_variables_file",
 ]

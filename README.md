@@ -248,6 +248,50 @@ ydf-recorder --from-events suite.events.json --output suite_v2.yaml --abstract-v
 ydf-recorder --from-events suite.events.json --output suite_v2.yaml --abstract-values
 ```
 
+## 录制值参数化（跨用户场景）
+
+一级项目管理这类流程里，A 用户新增并提交、B 用户审核，两个页面的列表顺序、
+列集合、单据状态都不同。靠行号或写死的项目名称都会选错数据。用业务主键变量
+把「第几行」换成「哪条数据」：
+
+```bash
+# A 段：新增 + 提交（首次会生成唯一名称并写入共享变量文件）
+ydf-recorder record --env ydf --output submit.yaml \
+  --param-field 项目名称=project.name --vars-output shared.vars.yaml
+
+# B 段：审核（换账号录制，指向同一份变量文件，复用 A 段的名称）
+ydf-recorder record --env audit --output audit.yaml \
+  --param-field 项目名称=project.name --vars-output shared.vars.yaml
+
+# 回放：两次运行都传同一份变量文件
+ydf-recorder replay submit.yaml --vars-file shared.vars.yaml
+ydf-recorder replay audit.yaml  --vars-file shared.vars.yaml
+```
+
+产出 `shared.vars.yaml`（值在录制时固化，**不在回放运行时生成**）：
+
+```yaml
+variables:
+  project:
+    name: 一级项目A-20261106-7adf8e
+```
+
+`--param-field 项目名称=project.name` 会把该字段的录入值、查询条件、
+表格选行 `match.equals`、capture 的 `match.equals` 统一替换为
+`{{project.name}}`；`column` / `field` / `label` / `menu_path` 等定位键保持不变。
+换数据时改变量文件，或用 `--param-set project.name=指定名称`；开启新一轮数据
+用 `--vars-fresh` 重新生成，固定基础数据用 `--vars-plain` 保留录制原值。
+
+注意事项：
+
+- 不要用 `{{random.*}}` 充当跨用户主键：回放器的随机值缓存是 case 级，换 case
+  就会换值；capture 是 suite 级且不跨进程。跨用户必须靠外部变量文件。
+- 表格选行要带 `match` 条件按名称精确匹配，不要用 `row_number` / 全选；录制
+  完成时会输出选行诊断，缺少 match 会给出警告。查不到目标行应当失败，不要
+  回退「第一行」。
+- GUI 里在「业务主键映射」填 `项目名称=project.name`，在「共享变量文件」填
+  同一个路径即可，A/B 两段录制共用。
+
 ## 产出的 YAML 示例
 
 ```yaml

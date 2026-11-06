@@ -58,11 +58,32 @@ def _child_popen_kwargs() -> dict[str, Any]:
     return {}
 
 
-def build_record_args(profile: str, output: str | Path, menu_path: str = "") -> list[str]:
-    """录制命令参数（复用 CLI record，环境由 --env 指定）。"""
+def build_record_args(
+    profile: str,
+    output: str | Path,
+    menu_path: str = "",
+    *,
+    variable_map: list[str] | None = None,
+    auto_variables: bool = False,
+    vars_output: str = "",
+) -> list[str]:
+    """录制命令参数（环境 + 可选的录制值参数化规则）。
+
+    ``variable_map`` 每行是 ``字段名=变量名``，交给 CLI 的 ``--param-field``；
+    ``auto_variables`` 打开 ``--param-auto``；``vars_output`` 指定共享变量文件，
+    A 提交与 B 审核两段录制填同一个路径即可共用同一个业务主键值。
+    """
     args = ["--env", profile, "--output", str(output)]
     if menu_path.strip():
         args += ["--menu-path", menu_path.strip()]
+    if auto_variables:
+        args.append("--param-auto")
+    for rule in variable_map or []:
+        line = rule.strip()
+        if line and not line.startswith("#"):
+            args += ["--param-field", line]
+    if vars_output.strip():
+        args += ["--vars-output", vars_output.strip()]
     return args
 
 
@@ -248,6 +269,36 @@ class RecorderApp:
             text="提示：菜单可只写末级（如 一级项目），运行时会按当前环境菜单树自动补全路径。",
             style="Hint.TLabel",
         ).grid(row=2, column=0, columnspan=3, sticky="w", pady=(6, 0))
+
+        # 录制值参数化：只把业务主键抽成外部变量，值固化在共享变量文件里
+        self.auto_vars_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(
+            box,
+            text="自动抽全部录入值（不推荐：会连基础数据一起抽）",
+            variable=self.auto_vars_var,
+        ).grid(row=3, column=0, columnspan=3, sticky="w", pady=(10, 0))
+
+        ttk.Label(box, text="业务主键映射（每行 字段名=变量名）").grid(
+            row=4, column=0, sticky="nw", pady=4
+        )
+        self.var_map_text = tk.Text(box, height=3, width=52)
+        self.var_map_text.grid(row=4, column=1, columnspan=2, sticky="ew", pady=4)
+        ttk.Label(
+            box,
+            text="例：项目名称=project.name（提交与审核两段录制都填这一行）",
+            style="Hint.TLabel",
+        ).grid(row=5, column=0, columnspan=3, sticky="w")
+
+        ttk.Label(box, text="共享变量文件（A/B 用户填同一路径）").grid(
+            row=6, column=0, sticky="w", pady=4
+        )
+        self.vars_output_var = tk.StringVar()
+        ttk.Entry(box, textvariable=self.vars_output_var, width=58).grid(
+            row=6, column=1, sticky="ew", pady=4
+        )
+        ttk.Button(box, text="选择…", command=self._choose_vars_output).grid(
+            row=6, column=2, padx=6
+        )
 
         run = ttk.Frame(frame)
         run.pack(fill="x", pady=12)
@@ -539,7 +590,27 @@ class RecorderApp:
             (Path.home() / ".ydf-recorder").mkdir(parents=True, exist_ok=True)
             (Path.home() / ".ydf-recorder" / "last_menu_path").write_text(menu, encoding="utf-8")
 
-        args = build_record_args(self.current_profile, out, menu)
+        from .parameterize import parse_rule
+
+        raw_rules = self.var_map_text.get("1.0", "end").splitlines()
+        rules: list[str] = []
+        try:
+            for line in raw_rules:
+                text = line.strip()
+                if text and not text.startswith("#"):
+                    parse_rule(text)
+                    rules.append(text)
+        except ValueError as exc:
+            self._alert(f"变量映射格式错误：\n\n{exc}")
+            return
+        args = build_record_args(
+            self.current_profile,
+            out,
+            menu,
+            variable_map=rules,
+            auto_variables=bool(self.auto_vars_var.get()),
+            vars_output=self.vars_output_var.get().strip(),
+        )
         self._append_log(
             f"\n==== 录制开始（环境 {self.current_profile}）→ {out} ====\n"
         )
@@ -558,6 +629,17 @@ class RecorderApp:
         )
         if chosen:
             self.yaml_var.set(chosen)
+
+    def _choose_vars_output(self) -> None:
+        from tkinter import filedialog
+
+        chosen = filedialog.asksaveasfilename(
+            title="选择共享变量文件",
+            defaultextension=".yaml",
+            filetypes=[("YAML", "*.yaml *.yml"), ("所有文件", "*.*")],
+        )
+        if chosen:
+            self.vars_output_var.set(chosen)
 
     def _choose_vars_file(self) -> None:
         from tkinter import filedialog
