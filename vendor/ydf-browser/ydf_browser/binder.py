@@ -317,15 +317,13 @@ def _collapse_same_root_exact_matches(
                 # A closed select's readonly search input still permits choice clicks on its root.
                 return [item for item in matches if item.is_identity_root]
         if not controls and str(candidate.component_name or "").lower() == "ydfdatepicker":
-            clickable_containers = [
+            return [
                 item
                 for item in matches
-                if not _runtime_is_direct_control(candidate, item)
+                if "ydf-date-picker" in str(item.class_name or "").split()
                 and item.visible
                 and item.pointer_receivable is True
             ]
-            if clickable_containers:
-                return [clickable_containers[-1]]
     non_button_controls = [item for item in controls if str(item.tag_name or "").lower() != "button"]
     if len(non_button_controls) == 1:
         return non_button_controls

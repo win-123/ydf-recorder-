@@ -263,6 +263,8 @@ cases:
 ydf-browser validate --dsl examples/project_suggest_tabs.yaml examples/payment_contract_registration_tabs.yaml
 ```
 
+`validate` 和 `run` 的执行前校验会检查全部展开后的 DSL 文件，按输入顺序一次性汇总各文件的校验错误；任一文件失败时，`run` 不会执行业务用例。终端显示错误文件数量、实际路径和错误详情，JSON 摘要通过 `validation_errors` 数组列出每个错误文件的 `dsl_file` 和 `message`；`run` 的 JSON、HTML 报告也会逐文件记录失败，`first_failure` 保留首个错误。变量错误会给出完整字段路径，例如 `cases[1].steps[2].target.conditions[1].equals: 未定义 DSL 变量: pay_allo_no`，其中用例、步骤和列表下标均从 1 开始。YAML 解析错误保留行号和列号。单个文件内部沿用现有校验规则，不保证穷举其全部错误。
+
 按文本清单指定 DSL 文件顺序：
 
 ```text

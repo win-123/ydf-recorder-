@@ -80,13 +80,24 @@ def validate_variable_namespaces(variables: dict[str, Any]) -> None:
             raise ValueError(f"{top_level} 为系统保留变量命名空间，不能在外部变量中定义")
 
 
-def _resolve_value(value: Any, variables: dict[str, Any], runtime_variables: set[str]) -> Any:
+def _resolve_value(value: Any, variables: dict[str, Any], runtime_variables: set[str], path: str = "") -> Any:
     if isinstance(value, dict):
-        return {key: _resolve_value(item, variables, runtime_variables) for key, item in value.items()}
+        return {
+            key: _resolve_value(item, variables, runtime_variables, f"{path}.{key}" if path else str(key))
+            for key, item in value.items()
+        }
     if isinstance(value, list):
-        return [_resolve_value(item, variables, runtime_variables) for item in value]
+        return [
+            _resolve_value(item, variables, runtime_variables, f"{path}[{index}]")
+            for index, item in enumerate(value, start=1)
+        ]
     if isinstance(value, str):
-        return _resolve_string(value, variables, runtime_variables)
+        try:
+            return _resolve_string(value, variables, runtime_variables)
+        except ValueError as exc:
+            if not path:
+                raise
+            raise ValueError(f"{path}: {exc}") from exc
     return value
 
 

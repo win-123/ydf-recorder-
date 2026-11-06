@@ -10721,6 +10721,85 @@ def test_playwright_runtime_fill_form_popup_reference_prefers_field_owner_over_t
     assert selected == [(owner_root, owner_input)]
 
 
+@pytest.mark.parametrize("initial", ["", "2026-10-29"])
+@pytest.mark.parametrize("numeric_identity", [False, True])
+def test_date_picker_fill_updates_real_input_with_clear_icon(
+    _popup_reference_page, initial, numeric_identity,
+) -> None:
+    from ydf_browser.binder import bind_manifest
+
+    page = _popup_reference_page
+    key = "2025052114375684062144276801278" if numeric_identity else "approval-date"
+    fieldid = "2025052114200642689824310720493_openData" if numeric_identity else "sqxx_form_approData"
+    page.set_content(f'''
+      <style>
+        .wui-modal {{ width: 700px; padding: 20px; }}
+        .wui-form-item {{ display: flex; height: 40px; }}
+        label {{ width: 100px; }}
+        .wui-picker {{ width: 300px; height: 32px; }}
+        .wui-picker-input {{ display: flex; }}
+        input {{ width: 240px; height: 28px; }}
+        .wui-picker-suffix {{ width: 20px; pointer-events: none; }}
+        .wui-picker-clear {{ width: 20px; cursor: pointer; }}
+      </style>
+      <div class="wui-modal" role="dialog">
+        <div class="wui-form-item" uikey="{key}">
+          <label>日期</label>
+          <div class="wui-picker ydf-date-picker" fieldid="{fieldid}">
+            <div class="wui-picker-input">
+              <input fieldid="{fieldid}_input" readonly value="{initial}" title="{initial}">
+              <span class="wui-picker-suffix" fieldid="{fieldid}_suffix">日</span>
+              <span class="wui-picker-clear" role="button" {'hidden' if not initial else ''}><svg width="10" height="10"></svg></span>
+            </div>
+          </div>
+        </div>
+        <button>保存</button><button>取消</button>
+      </div>
+    ''')
+    runtime = _build_runtime()
+    runtime._page = page
+    candidate = ElementCandidate(
+        key=key, fieldid=fieldid, label="日期", title="日期", region_key=None,
+        region_fieldid=None, element_type="formItem", component_name="YDFDatePicker",
+        runtime_fieldids=[fieldid, f"{fieldid}_input", f"{fieldid}_suffix", key],
+        verified_runtime_fieldids=[key if numeric_identity else fieldid],
+    )
+    manifest = PageManifest(PageMeta("form", None, None, None), fields=[candidate])
+    bound = bind_manifest(manifest, runtime.capture_runtime_elements(manifest)).fields_by_key[key]
+
+    result = runtime.fill_form_field(bound, "2026-06-06")
+
+    assert result["confirmed"] is True
+    assert page.locator("input").input_value() == "2026-06-06"
+    assert runtime.read_field_value(bound) == "2026-06-06"
+    assert page.locator(".wui-picker-clear").get_attribute("title") is None
+
+
+@pytest.mark.parametrize("target", ["clear-icon", "rejected-input"])
+def test_date_picker_fill_rejects_false_backfill_from_title(_popup_reference_page, target) -> None:
+    page = _popup_reference_page
+    page.set_content('''
+      <div class="wui-picker">
+        <input readonly value="2026-10-29" title="2026-10-29" oninput="this.value=''">
+        <span class="wui-picker-clear" role="button"><svg width="10" height="10"></svg></span>
+      </div>
+    ''')
+    runtime = _build_runtime()
+    runtime._page = page
+    selector = ".wui-picker-clear" if target == "clear-icon" else "input"
+    bound = SimpleNamespace(
+        candidate=SimpleNamespace(label="日期", component_name="YDFDatePicker"),
+        runtime=SimpleNamespace(selector=selector, in_dialog=True),
+    )
+    message = "日期录入目标必须是 input" if target == "clear-icon" else "字段录入后未回填"
+
+    with pytest.raises(RuntimeError, match=message):
+        runtime.fill_form_field(bound, "2026-06-06")
+
+    assert page.locator(".wui-picker-clear").get_attribute("title") is None
+    assert page.locator("input").input_value() == ("2026-10-29" if target == "clear-icon" else "")
+
+
 def test_playwright_runtime_fill_form_field_treats_date_picker_as_plain_input(monkeypatch) -> None:
     runtime = _build_runtime()
     runtime._page = _FakePage()

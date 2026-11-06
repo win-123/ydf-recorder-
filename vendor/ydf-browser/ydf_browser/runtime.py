@@ -2284,8 +2284,13 @@ class PlaywrightRuntime:
     def _confirm_plain_field_value(self, locator, value: Any, bound_element: BoundElement) -> dict[str, Any]:
         expected = str(value)
         actual = ""
+        date_field = self._looks_like_date_field(bound_element)
         for _ in range(16):
-            actual = self._read_plain_fill_value(locator)
+            actual = (
+                _normalize_plain_field_value(locator.input_value(timeout=200))
+                if date_field
+                else self._read_plain_fill_value(locator)
+            )
             if _plain_field_value_matches(actual, expected):
                 return {
                     "actual": actual,
@@ -3163,6 +3168,8 @@ class PlaywrightRuntime:
         return "daterange" in probe or "date_range" in probe or ("range" in probe and "date" in probe)
 
     def _set_date_field_value(self, locator, value: str) -> None:
+        if not locator.evaluate("(node) => node.tagName === 'INPUT'"):
+            raise RuntimeError("日期录入目标必须是 input")
         try:
             locator.evaluate(
                 """(node, value) => {

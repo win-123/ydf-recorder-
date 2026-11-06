@@ -31,7 +31,7 @@ from .bpr_report import enrich_bpr_reports
 from .session_reuse import SessionReuse, CookieBridge
 from .browser_profile import clear_profile, profile_payload, resolve_profile_path
 from .config import ConfigLoader, default_config_path
-from .dsl import load_dsl_document_from_file
+from .dsl import DslBatchError, load_dsl_documents_from_files
 from .executor import WorkflowExecutor
 from .menu_opening import MenuOpening
 from .fiscal_year_context import FiscalYearContext
@@ -416,7 +416,10 @@ def main(argv: list[str] | None = None) -> int:
         except Exception as exc:
             error_message = str(exc)
             _print_human_error(error_message)
-            _print_json({"success": False, "error": error_message})
+            payload = {"success": False, "error": error_message}
+            if isinstance(exc, DslBatchError):
+                payload["validation_errors"] = exc.errors
+            _print_json(payload)
             return 1
 
 
@@ -534,8 +537,7 @@ def _cmd_validate(args: argparse.Namespace) -> int:
     dsl_paths = discover_dsl_files(_dsl_inputs(args))
     dsl_files: list[dict[str, Any]] = []
     case_total = 0
-    for dsl_path in dsl_paths:
-        document = load_dsl_document_from_file(dsl_path, variables=variables, validate_bpr_state=True)
+    for dsl_path, document in load_dsl_documents_from_files(dsl_paths, variables=variables, validate_bpr_state=True):
         cases = filter_cases(
             document.cases,
             case_codes=args.case_codes,
@@ -1563,6 +1565,7 @@ def _cmd_run_validation_failed(
         variables=variables,
         env=env,
         request_forward_rules=request_forward_rules or [],
+        validation_errors=exc.errors if isinstance(exc, DslBatchError) else None,
         observation=(
             {
                 "outcome": "blocked",
@@ -1580,7 +1583,11 @@ def _cmd_run_validation_failed(
         _write_performance_workbook(result, report_file.with_name("performance.xlsx"))
     if isinstance(event_logger, ObservationSession):
         event_logger.stop_heartbeat()
-    event_logger.write("run_validation_failed", {"run_id": run_id, "error": message})
+    failure_event = {"run_id": run_id, "error": message}
+    if isinstance(exc, DslBatchError):
+        result["validation_errors"] = exc.errors
+        failure_event["validation_errors"] = exc.errors
+    event_logger.write("run_validation_failed", failure_event)
     event_logger.write("run_end", {"run_id": run_id, "success": False, "totals": result["totals"]})
     _write_json_file(report_file, result)
     render_html_report(result, html_report_file)
@@ -1612,45 +1619,51 @@ def _validation_failure_result(
     variables: dict[str, Any],
     env,
     request_forward_rules: list[RequestForwardRule] | None = None,
+    validation_errors: list[dict[str, str]] | None = None,
     observation: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     suite = DslTestSuite(code="dsl_validation", name="DSL 语法校验")
     case = DslTestCase(code="syntax-validation", name="DSL 语法校验失败")
-    report = ExecutionReport(
-        success=False,
-        step_results=[
-            StepResult(
-                action="dsl.validate",
-                success=False,
-                message=message,
-                data={"error": {"type": "ValueError", "message": message}},
-            )
-        ],
-        errors=[message],
-    )
-    dsl_file = _first_dsl_input(args)
-    case_report = {
-        "dsl_file": dsl_file,
-        "suite_code": suite.code,
-        "case_index": 1,
-        "total_cases": 1,
-        "case": case.to_dict(),
-        "success": False,
-        "status": "failed",
-        "started_at": started_at,
-        "ended_at": _now_iso(),
-        "duration_ms": 0,
-        "report": report.to_dict(),
-        "errors": [message],
-    }
-    suite_report = {
-        "dsl_file": dsl_file,
-        "suite": suite.to_dict(),
-        "success": False,
-        "on_case_failure": "stop_run",
-        "totals": {"cases": 1, "passed": 0, "failed": 1, "skipped": 0},
-        "case_reports": [case_report],
-    }
+    suite_reports = []
+    for error in validation_errors or [{"dsl_file": _first_dsl_input(args), "message": message}]:
+        dsl_file = error["dsl_file"]
+        error_message = error["message"]
+        report = ExecutionReport(
+            success=False,
+            step_results=[
+                StepResult(
+                    action="dsl.validate",
+                    success=False,
+                    message=error_message,
+                    data={"error": {"type": "ValueError", "message": error_message}},
+                )
+            ],
+            errors=[error_message],
+        )
+        case_report = {
+            "dsl_file": dsl_file,
+            "suite_code": suite.code,
+            "case_index": 1,
+            "total_cases": 1,
+            "case": case.to_dict(),
+            "success": False,
+            "status": "failed",
+            "started_at": started_at,
+            "ended_at": _now_iso(),
+            "duration_ms": 0,
+            "report": report.to_dict(),
+            "errors": [error_message],
+        }
+        suite_reports.append(
+            {
+                "dsl_file": dsl_file,
+                "suite": suite.to_dict(),
+                "success": False,
+                "on_case_failure": "stop_run",
+                "totals": {"cases": 1, "passed": 0, "failed": 1, "skipped": 0},
+                "case_reports": [case_report],
+            }
+        )
     run_payload = {
         "id": run_id,
         "started_at": started_at,
@@ -1670,8 +1683,14 @@ def _validation_failure_result(
     return {
         "success": False,
         "run": run_payload,
-        "totals": {"suites": 1, "cases": 1, "passed": 0, "failed": 1, "skipped": 0},
-        "suite_reports": [suite_report],
+        "totals": {
+            "suites": len(suite_reports),
+            "cases": len(suite_reports),
+            "passed": 0,
+            "failed": len(suite_reports),
+            "skipped": 0,
+        },
+        "suite_reports": suite_reports,
     }
 
 
@@ -1684,12 +1703,9 @@ def _load_suite_specs(args: argparse.Namespace, variables: dict[str, Any] | None
     dsl_paths = discover_dsl_files(_dsl_inputs(args))
     specs: list[SuiteRunSpec] = []
     performance_enabled = bool(getattr(args, "performance", False))
-    for dsl_path in dsl_paths:
-        document = load_dsl_document_from_file(
-            dsl_path,
-            variables=variables,
-            validate_bpr_state=performance_enabled,
-        )
+    for dsl_path, document in load_dsl_documents_from_files(
+        dsl_paths, variables=variables, validate_bpr_state=performance_enabled
+    ):
         cases = filter_cases(
             document.cases,
             case_codes=args.case_codes,
@@ -2168,6 +2184,8 @@ def _summary_payload(result: dict[str, Any], report_file: Path, events_file: Pat
     first_failure = _first_failure(result)
     if first_failure:
         summary["first_failure"] = first_failure
+    if result.get("validation_errors"):
+        summary["validation_errors"] = result["validation_errors"]
     if result.get("performance_file"):
         summary["performance_file"] = str(result.get("performance_file"))
     if result.get("performance_export_error"):

@@ -97,6 +97,8 @@ ydf-browser run --dsl-list suites.txt --headless
 
 清单中的相对路径按清单文件所在目录解析，空行和 `#` 注释行会被忽略。`--dsl-list` 表示存在前后依赖的严格串行执行链，不能同时设置 `--concurrency` 大于 `1`。
 
+`validate` 和 `run` 的执行前校验会检查全部展开后的 DSL 文件，按输入顺序一次性汇总各文件的错误；任一文件失败时，`run` 不会执行业务用例。终端显示实际出错文件及错误详情，JSON 摘要的 `validation_errors` 数组包含各文件的 `dsl_file` 和 `message`；`run` 的 JSON、HTML 报告也会逐文件记录失败。变量错误同时显示字段路径，例如 `cases[1].steps[2].target.conditions[1].equals`，下标从 1 开始；YAML 解析错误保留行号和列号。单个文件内部沿用现有校验规则，不保证穷举其全部错误。
+
 默认真实运行会使用 ydf-browser 管理的持久化浏览器 profile，模拟测试人员长期使用同一个浏览器访问多个环境。每个用例安装当前账号已验证的 cookies，不清理 localStorage、IndexedDB、HTTP cache 或 service worker。
 
 真实 DSL 运行默认按规范化后的实际 `base_url + username` 复用认证会话，配置别名不影响身份。每例先探测身份并校验租户、组织和年度；有效时不重新提交密码。同一本机会话目录内，同身份用例全程串行。会话保存在 `<YDF_BROWSER_HOME>/sessions/`（默认 `~/.ydf-browser/sessions/`），属于敏感登录态，不应分享或提交。

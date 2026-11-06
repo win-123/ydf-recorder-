@@ -3029,6 +3029,151 @@ steps:
     assert "旧式 steps DSL 已废弃" in data["error"]
 
 
+@pytest.mark.parametrize("command", ["validate", "run"])
+@pytest.mark.parametrize("input_kind", ["directory", "files", "list"])
+@pytest.mark.parametrize("failure", ["variable", "schema", "yaml"])
+def test_cli_validation_identifies_failing_file_and_location(
+    tmp_path, capsys, monkeypatch, command, input_kind, failure
+) -> None:
+    dsl_dir = tmp_path / "inputs"
+    dsl_dir.mkdir()
+    valid_path = dsl_dir / "01-valid.yaml"
+    invalid_path = dsl_dir / "02-invalid.yaml"
+    valid_yaml = _suite_yaml("valid", "valid-case")
+    valid_path.write_text(valid_yaml, encoding="utf-8")
+    if failure == "variable":
+        invalid_yaml = valid_yaml.replace("项目管理>>项目立项", '"{{pay_allo_no}}"')
+        expected_error = "cases[1].steps[1].menu_path: 未定义 DSL 变量: pay_allo_no"
+    elif failure == "schema":
+        invalid_yaml = valid_yaml.replace("menu_path: 项目管理>>项目立项", "unexpected: true")
+        expected_error = "cases[1].steps[1]"
+    else:
+        invalid_yaml = "suite: [\n"
+        expected_error = "line 2, column 1"
+    invalid_path.write_text(invalid_yaml, encoding="utf-8")
+    if input_kind == "directory":
+        inputs = ["--dsl", str(dsl_dir)]
+    elif input_kind == "files":
+        inputs = ["--dsl", str(valid_path), str(invalid_path)]
+    else:
+        dsl_list = tmp_path / "suites.txt"
+        dsl_list.write_text(f"{valid_path}\n{invalid_path}\n", encoding="utf-8")
+        inputs = ["--dsl-list", str(dsl_list)]
+    report_file = tmp_path / "report.json"
+    args = [command, *inputs]
+    if command == "run":
+        report_file.write_text('{"success": true}', encoding="utf-8")
+        args.extend([
+            "--template-file", "must-not-be-read-template.json",
+            "--runtime-file", "must-not-be-read-runtime.json",
+            "--report-file", str(report_file),
+        ])
+
+    def unexpected_execution(*args, **kwargs):
+        pytest.fail("校验失败时不得执行用例")
+
+    monkeypatch.setattr(cli_module, "_run_suite_specs_in_process", unexpected_execution)
+    exit_code = main(args)
+
+    captured = capsys.readouterr()
+    data = json.loads(captured.out)
+    assert exit_code == 1
+    assert data["success"] is False
+    assert str(invalid_path) in data["error"]
+    assert str(invalid_path) in captured.err
+    assert expected_error in data["error"]
+    if command == "run":
+        assert data["first_failure"]["dsl_file"] == str(invalid_path)
+        report = json.loads(report_file.read_text(encoding="utf-8"))
+        suite_report = report["suite_reports"][0]
+        assert suite_report["dsl_file"] == str(invalid_path)
+        case_report = suite_report["case_reports"][0]
+        assert case_report["dsl_file"] == str(invalid_path)
+        assert case_report["report"]["errors"] == [data["error"]]
+        assert str(invalid_path) in report_file.with_suffix(".html").read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("command", ["validate", "run", "ai-run"])
+@pytest.mark.parametrize("input_kind", ["directory", "files", "list", "glob"])
+def test_cli_validation_collects_errors_from_all_files(tmp_path, capsys, monkeypatch, command, input_kind) -> None:
+    dsl_dir = tmp_path / "inputs"
+    dsl_dir.mkdir()
+    valid_yaml = _suite_yaml("valid", "valid-case")
+    contents = {
+        "01-variable.yaml": valid_yaml.replace("项目管理>>项目立项", '"{{missing_number}}"'),
+        "02-valid.yaml": valid_yaml,
+        "03-schema.yaml": valid_yaml.replace("menu_path: 项目管理>>项目立项", "unexpected: true"),
+        "04-syntax.yaml": "suite: [\n",
+        "05-valid.yaml": valid_yaml,
+    }
+    for name, content in contents.items():
+        (dsl_dir / name).write_text(content, encoding="utf-8")
+    paths = [dsl_dir / name for name in contents]
+    invalid_paths = [paths[0], paths[2], paths[3]]
+    if input_kind == "directory":
+        inputs = ["--dsl", str(dsl_dir)]
+    elif input_kind == "files":
+        inputs = ["--dsl", *(str(path) for path in paths)]
+    elif input_kind == "glob":
+        inputs = ["--dsl", str(dsl_dir / "*.yaml")]
+        invalid_paths = [path for path in cli_module.discover_dsl_files(inputs[1:]) if path in invalid_paths]
+    else:
+        dsl_list = tmp_path / "suites.txt"
+        dsl_list.write_text("\n".join(str(path) for path in paths), encoding="utf-8")
+        inputs = ["--dsl-list", str(dsl_list)]
+    report_file = tmp_path / "report.json"
+    args = ["run" if command == "ai-run" else command, *inputs]
+    if command != "validate":
+        if command == "run":
+            report_file.write_text('{"success": true}', encoding="utf-8")
+        args.extend([
+            "--template-file", "must-not-be-read-template.json",
+            "--runtime-file", "must-not-be-read-runtime.json",
+            "--report-file", str(report_file),
+        ])
+        if command == "ai-run":
+            args.append("--ai-observe")
+
+    def unexpected_execution(*args, **kwargs):
+        pytest.fail("任一文件校验失败时不得执行任何用例")
+
+    monkeypatch.setattr(cli_module, "_run_suite_specs_in_process", unexpected_execution)
+    monkeypatch.setattr(cli_module, "_run_ai_suite_supervised", unexpected_execution)
+    exit_code = main(args)
+
+    captured = capsys.readouterr()
+    data = json.loads(captured.out)
+    assert exit_code == 1
+    assert data["success"] is False
+    errors = data["validation_errors"]
+    assert [error["dsl_file"] for error in errors] == [str(path) for path in invalid_paths]
+    messages = {Path(error["dsl_file"]).name: error["message"] for error in errors}
+    assert "未定义 DSL 变量: missing_number" in messages["01-variable.yaml"]
+    assert "cases[1].steps[1]" in messages["03-schema.yaml"]
+    assert "line 2, column 1" in messages["04-syntax.yaml"]
+    assert "3 个文件" in data["error"]
+    for path in invalid_paths:
+        assert str(path) in captured.err
+        assert str(path) in data["error"]
+    if command != "validate":
+        assert data["first_failure"]["dsl_file"] == str(invalid_paths[0])
+        report = json.loads(report_file.read_text(encoding="utf-8"))
+        assert report["validation_errors"] == errors
+        assert report["totals"] == {"suites": 3, "cases": 3, "passed": 0, "failed": 3, "skipped": 0}
+        assert [suite["dsl_file"] for suite in report["suite_reports"]] == [str(path) for path in invalid_paths]
+        for suite, error in zip(report["suite_reports"], errors):
+            case = suite["case_reports"][0]
+            assert case["dsl_file"] == error["dsl_file"]
+            assert case["report"]["errors"] == [error["message"]]
+        html = report_file.with_suffix(".html").read_text(encoding="utf-8")
+        assert all(str(path) in html for path in invalid_paths)
+        events = [json.loads(line) for line in (tmp_path / "events.jsonl").read_text().splitlines()]
+        event = next(event for event in events if event["event"] == "run_validation_failed")
+        assert event["validation_errors"] == errors
+        if command == "ai-run":
+            assert report["run"]["observation"]["reason_code"] == "dsl_invalid"
+
+
 def test_cli_doctor_skip_config_checks_runtime_contract(capsys) -> None:
     exit_code = main(["doctor", "--skip-config"])
 

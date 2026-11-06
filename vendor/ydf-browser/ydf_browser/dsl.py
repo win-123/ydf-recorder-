@@ -576,6 +576,41 @@ COMPONENT_TARGET_SCHEMAS: dict[tuple[str, str], TargetSchema] = {
 VALID_COMPONENT_OPERATIONS = set(COMPONENT_TARGET_SCHEMAS)
 
 
+class DslFileError(ValueError):
+    def __init__(self, dsl_file: str | Path, message: str) -> None:
+        self.dsl_file = str(dsl_file)
+        super().__init__(f"DSL 文件: {self.dsl_file}\n{message}")
+
+
+class DslBatchError(ValueError):
+    def __init__(self, errors: list[DslFileError]) -> None:
+        self.errors = [{"dsl_file": error.dsl_file, "message": str(error)} for error in errors]
+        message = "\n\n".join(str(error) for error in errors)
+        if len(errors) > 1:
+            message = f"DSL 校验失败，共 {len(errors)} 个文件有错误:\n\n{message}"
+        super().__init__(message)
+
+
+def load_dsl_documents_from_files(
+    paths: list[Path],
+    variables: dict[str, Any] | None = None,
+    *,
+    validate_bpr_state: bool = True,
+) -> list[tuple[Path, DslDocument]]:
+    documents: list[tuple[Path, DslDocument]] = []
+    errors: list[DslFileError] = []
+    for path in paths:
+        try:
+            document = load_dsl_document_from_file(path, variables=variables, validate_bpr_state=validate_bpr_state)
+        except DslFileError as exc:
+            errors.append(exc)
+            continue
+        documents.append((path, document))
+    if errors:
+        raise DslBatchError(errors)
+    return documents
+
+
 def load_dsl_from_file(
     path: str | Path,
     variables: dict[str, Any] | None = None,
@@ -594,8 +629,11 @@ def load_dsl_document_from_file(
     validate_bpr_state: bool = True,
 ) -> DslDocument:
     file_path = Path(path)
-    data = yaml.safe_load(file_path.read_text(encoding="utf-8"))
-    return load_dsl_document(data, variables=variables, validate_bpr_state=validate_bpr_state)
+    try:
+        data = yaml.safe_load(file_path.read_text(encoding="utf-8"))
+        return load_dsl_document(data, variables=variables, validate_bpr_state=validate_bpr_state)
+    except (ValueError, yaml.YAMLError, OSError) as exc:
+        raise DslFileError(file_path, str(exc)) from exc
 
 
 def load_dsl_document(

@@ -1502,6 +1502,33 @@ def test_load_dsl_document_reports_missing_external_variable() -> None:
         )
 
     assert "未定义 DSL 变量: budget_code" in str(exc.value)
+    assert "cases[1].steps[1].target.conditions[1].equals" in str(exc.value)
+
+
+@pytest.mark.parametrize(
+    ("value", "variables", "message"),
+    [
+        ("{{missing}}", {}, "未定义 DSL 变量: missing"),
+        ("编号-{{missing}}", {}, "未定义 DSL 变量: missing"),
+        ("${removed}", {}, "不支持 ${} 变量语法"),
+        ("编号-{{object}}", {"object": {}}, "DSL 变量不能用于字符串拼接: object"),
+    ],
+)
+def test_load_dsl_document_locates_variable_errors_in_later_cases(value, variables, message) -> None:
+    payload = _suite_payload([{"action": "open_menu", "menu_path": "项目管理>>项目立项"}])
+    payload["cases"].append({
+        "code": "second-case",
+        "name": "第二个用例",
+        "steps": [
+            {"action": "open_menu", "menu_path": "项目管理>>项目立项"},
+            {"component": "form", "operation": "fill", "target": {"fields": {"说明": value}}},
+        ],
+    })
+
+    with pytest.raises(ValueError) as exc:
+        load_dsl_document(payload, variables=variables)
+
+    assert f"cases[2].steps[2].target.fields.说明: {message}" in str(exc.value)
 
 
 def test_load_dsl_document_supports_chinese_variable_names() -> None:

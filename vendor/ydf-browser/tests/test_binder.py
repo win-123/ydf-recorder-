@@ -560,7 +560,7 @@ def test_bind_manifest_select_uses_unique_identity_root_without_editable_input()
     assert "state" not in bind_manifest(manifest, [root, label, *controls]).fields_by_key
 
 
-def test_bind_manifest_collapses_direct_identity_date_root_to_unique_input() -> None:
+def test_bind_manifest_collapses_direct_identity_date_root_to_picker_container() -> None:
     direct_id = "2025042916094932627680310720055"
     manifest = build_page_manifest(
         {
@@ -597,12 +597,13 @@ def test_bind_manifest_collapses_direct_identity_date_root_to_unique_input() -> 
         {
             "fieldid": direct_id,
             "tag_name": tag_name,
+            "class_name": "wui-picker ydf-date-picker" if index == 3 else "",
             "visible": True,
             "editable": True,
             "pointer_receivable": True,
             "identity_root": "0:21",
         }
-        for tag_name in ("div", "div", "label", "div")
+        for index, tag_name in enumerate(("div", "div", "label", "div"))
     ]
     date_input = {
         "fieldid": f"{direct_id}_input",
@@ -625,6 +626,11 @@ def test_bind_manifest_collapses_direct_identity_date_root_to_unique_input() -> 
     assert binding.fields_by_key[direct_id].contract_path["applicability"] == "verified"
     assert binding.fields_by_key[direct_id].contract_path["fallback_reason"] is None
     assert binding.incompatible_fields == {}
+
+    duplicate = bind_manifest(manifest, [*wrappers, date_input, dict(wrappers[-1])])
+
+    assert direct_id not in duplicate.fields_by_key
+    assert duplicate.incompatible_fields["关账日期"]["applicability"] == "incompatible"
 
 
 def test_bind_manifest_tree_modal_prefers_unique_nested_search_input_over_trigger_button() -> None:

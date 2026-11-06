@@ -1,0 +1,55 @@
+# Bug 现象: 核准日期可填写；开户日期 form.fill 显示 confirmed=true，紧接的断言却读回默认业务日期。
+# 原始错误: 字段 开户日期 值不匹配: expected='2026-06-06', actual='2026-10-29'
+# 根因: 日期候选归并选中了清空图标，写入器向图标设置 title，确认器又把该属性当作真实回填。
+# 修复: 同根候选只接受唯一日期容器；日期写入和确认必须使用真实 input。
+# 安全边界: 多个日期容器或没有真实输入时失败关闭；不按 DOM 顺序任选，不保存、不提交业务单据。
+# expected: 两段日期录入均由紧接的 form.assert_values 证明实际值已保留。
+# run: ./.venv/bin/python -m ydf_browser.cli run --dsl tests/real_cases/account_date_picker_clear_icon.yaml --env t53 --headless
+
+suite:
+  code: real-regression-account-date-picker-clear-icon
+  name: 账户日期清空图标误绑定真实回归
+  tenant: 财政一体化
+  default_org: '360000000'
+cases:
+- code: account-date-picker-clear-icon
+  name: 核准日期与已有默认值的开户日期录入对照
+  user: '15500500501'
+  steps:
+  - action: open_menu
+    menu_path: 账户管理>>行政事业单位账户管理>>日常管理>>单位账户补填
+  - component: table_row_action
+    operation: click
+    target:
+      action: 补填
+      row_number: 1
+  - component: form
+    operation: fill
+    target:
+      fields:
+        核准日期: '2026-07-07'
+  - component: form
+    operation: assert_values
+    target:
+      fields:
+        核准日期: '2026-07-07'
+  - action: open_menu
+    menu_path: 单位账户业务申请
+  - component: tree
+    operation: select
+    target:
+      label: 23 乡镇零余额账户
+  - component: toolbar
+    operation: click
+    target:
+      label: 开立
+  - component: form
+    operation: fill
+    target:
+      fields:
+        开户日期: '2026-06-06'
+  - component: form
+    operation: assert_values
+    target:
+      fields:
+        开户日期: '2026-06-06'
